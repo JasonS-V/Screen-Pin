@@ -1,0 +1,46 @@
+:root {
+  --chassis-dark: #141413;
+  --chassis-light: #F4F3EF;
+  --surface-secondary: #262624;
+  --text-muted-dark: #A3A19A;
+  --text-muted-light: #4A4945;
+  --accent-amber: #D95D1E;
+  --accent-focus: #FF8A50;
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, monospace;
+}
+
+[data-theme="dark"] {
+  --bg-primary: var(--chassis-dark);
+  --text-primary: var(--chassis-light);
+  --text-secondary: var(--text-muted-dark);
+  --border-color: var(--surface-secondary);
+}
+
+[data-theme="light"] {
+  --bg-primary: var(--chassis-light);
+  --text-primary: var(--chassis-dark);
+  --text-secondary: var(--text-muted-light);
+  --border-color: #E2E0D8;
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-focus);
+  outline-offset: 1px;
+}
