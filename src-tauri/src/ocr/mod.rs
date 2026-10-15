@@ -1,3 +1,6 @@
+#[cfg(target_os = "windows")]
+pub mod windows_ocr;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -86,7 +86,7 @@ impl CaptureState {
     }
 
     /// Extrae el rectángulo seleccionado del buffer en RAM y lo codifica a PNG en memoria
-    pub fn crop_and_store(&self, crop_id: &str, crop: CropSelection) -> Result<Vec<u8>, String> {
+    pub fn crop_and_store(&self, crop_id: &str, crop: CropSelection) -> Result<(Vec<u8>, RgbaImage), String> {
         let frames = self.monitor_frames.lock().map_err(|e| e.to_string())?;
         let frame = frames
             .get(&crop.monitor_id)
@@ -111,7 +111,7 @@ impl CaptureState {
         let mut pinned = self.pinned_crops.lock().map_err(|e| e.to_string())?;
         pinned.insert(crop_id.to_string(), png_bytes.clone());
 
-        Ok(png_bytes)
+        Ok((png_bytes, sub_img))
     }
 
     pub fn get_crop_bytes(&self, crop_id: &str) -> Option<Vec<u8>> {
