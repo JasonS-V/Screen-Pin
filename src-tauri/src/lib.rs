@@ -224,7 +224,8 @@ fn open_memory_drawer(app: AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App("/memory".into()))
+    let url = "index.html?view=memory";
+    tauri::WebviewWindowBuilder::new(&app, label, tauri::WebviewUrl::App(url.into()))
         .title("Memoria - Screen-Pin")
         .inner_size(360.0, 680.0)
         .decorations(true)
@@ -254,7 +255,7 @@ pub fn spawn_pin_window(
     h: f64,
 ) -> Result<(), String> {
     let label = format!("pin-{}", pin_id);
-    let url = format!("/pin/{}", pin_id);
+    let url = format!("index.html?view=pin&pin_id={}", pin_id);
 
     tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
         .title("Screen-Pin")
@@ -280,7 +281,7 @@ pub fn start_capture_flow(app: &AppHandle) -> Result<(), String> {
 
     for mon in &monitors {
         let label = format!("overlay-{}", mon.id);
-        let url = format!("/overlay?monitor_id={}", mon.id);
+        let url = format!("index.html?view=overlay&monitor_id={}", mon.id);
 
         let logical_x = mon.x as f64;
         let logical_y = mon.y as f64;
@@ -338,20 +339,12 @@ pub fn run() {
 
             if let Some(mon_str) = trimmed.strip_prefix("monitor/") {
                 if let Ok(mon_id) = mon_str.parse::<u32>() {
-                    let frames = state_for_protocol.monitor_frames.lock().unwrap();
-                    if let Some(frame) = frames.get(&mon_id) {
-                        let mut png_bytes = Vec::new();
-                        let mut cursor = std::io::Cursor::new(&mut png_bytes);
-                        if frame
-                            .write_to(&mut cursor, image::ImageFormat::Png)
-                            .is_ok()
-                        {
-                            return Response::builder()
-                                .status(StatusCode::OK)
-                                .header(CONTENT_TYPE, "image/png")
-                                .body(png_bytes)
-                                .unwrap();
-                        }
+                    if let Some(bytes) = state_for_protocol.get_monitor_preview(mon_id) {
+                        return Response::builder()
+                            .status(StatusCode::OK)
+                            .header(CONTENT_TYPE, "image/jpeg")
+                            .body(bytes)
+                            .unwrap();
                     }
                 }
             } else if let Some(bytes) = state_for_protocol.get_crop_bytes(trimmed) {

@@ -29,6 +29,8 @@ pub struct CropSelection {
 pub struct CaptureState {
     /// Buffers completos capturados de cada monitor indexados por monitor.id()
     pub monitor_frames: Arc<Mutex<HashMap<u32, RgbaImage>>>,
+    /// Previews codificados en JPEG para visualización ultra rápida e instantánea en el overlay
+    pub monitor_previews: Arc<Mutex<HashMap<u32, Vec<u8>>>>,
     /// Metadatos de cada monitor
     pub monitors: Arc<Mutex<Vec<MonitorInfo>>>,
     /// Recortes listos para ser consumidos por stickers via pinasset://
@@ -39,6 +41,7 @@ impl CaptureState {
     pub fn new() -> Self {
         Self {
             monitor_frames: Arc::new(Mutex::new(HashMap::new())),
+            monitor_previews: Arc::new(Mutex::new(HashMap::new())),
             monitors: Arc::new(Mutex::new(Vec::new())),
             pinned_crops: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -49,6 +52,7 @@ impl CaptureState {
         let all_monitors = Monitor::all().map_err(|e| format!("Fallo al listar monitores: {e}"))?;
         let mut infos = Vec::new();
         let mut frames = HashMap::new();
+        let mut previews = HashMap::new();
 
         for (idx, mon) in all_monitors.into_iter().enumerate() {
             let id = idx as u32;
@@ -73,16 +77,33 @@ impl CaptureState {
             infos.push(info);
 
             let img = mon.capture_image().map_err(|e| format!("Fallo al capturar monitor: {e}"))?;
+
+            // Pre-codificar JPEG para visualización instantánea en overlay sin congelamientos
+            let mut jpg_bytes = Vec::new();
+            let mut cursor = std::io::Cursor::new(&mut jpg_bytes);
+            let rgb_img = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8();
+            if rgb_img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {
+                previews.insert(id, jpg_bytes);
+            }
+
             frames.insert(id, img);
         }
 
         let mut stored_frames = self.monitor_frames.lock().map_err(|e| e.to_string())?;
         *stored_frames = frames;
 
+        let mut stored_previews = self.monitor_previews.lock().map_err(|e| e.to_string())?;
+        *stored_previews = previews;
+
         let mut stored_monitors = self.monitors.lock().map_err(|e| e.to_string())?;
         *stored_monitors = infos.clone();
 
         Ok(infos)
+    }
+
+    pub fn get_monitor_preview(&self, monitor_id: u32) -> Option<Vec<u8>> {
+        let previews = self.monitor_previews.lock().ok()?;
+        previews.get(&monitor_id).cloned()
     }
 
     /// Extrae el rectángulo seleccionado del buffer en RAM y lo codifica a PNG en memoria
