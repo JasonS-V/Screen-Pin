@@ -17,6 +17,10 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 
 struct ShortcutWarnings(Vec<String>);
 
+fn crop_desktop_coordinate(origin: i32, pixel_offset: u32, scale: f64) -> f64 {
+    f64::from(origin) + f64::from(pixel_offset) / scale
+}
+
 #[tauri::command]
 fn get_shortcut_warnings(state: State<'_, ShortcutWarnings>) -> Vec<String> {
     state.0.clone()
@@ -59,8 +63,13 @@ async fn confirm_crop(
     };
 
     let (png_bytes, sub_img) = state.crop_and_store(&crop_id, crop)?;
-    let logical_x = f64::from(monitor.x) + f64::from(physical_x);
-    let logical_y = f64::from(monitor.y) + f64::from(physical_y);
+    let position_scale = if cfg!(target_os = "macos") {
+        f64::from(monitor.scale_factor)
+    } else {
+        1.0
+    };
+    let logical_x = crop_desktop_coordinate(monitor.x, physical_x, position_scale);
+    let logical_y = crop_desktop_coordinate(monitor.y, physical_y, position_scale);
     let logical_w = f64::from(sub_img.width()) / f64::from(monitor.scale_factor);
     let logical_h = f64::from(sub_img.height()) / f64::from(monitor.scale_factor);
 
@@ -115,29 +124,29 @@ async fn confirm_crop(
     let pin_id_for_ocr = crop_id.clone();
     let db_for_ocr = Arc::clone(&db);
     std::thread::spawn(move || {
-        #[cfg(target_os = "windows")]
-        {
-            match crate::ocr::windows_ocr::run_windows_ocr(&pin_id_for_ocr, &sub_img) {
-                Ok(payload) => {
-                    if let Err(error) = db_for_ocr.update_ocr(&pin_id_for_ocr, Some(&payload)) {
-                        eprintln!("No se pudo guardar el texto: {error}");
-                    }
+        match crate::ocr::run_ocr(&pin_id_for_ocr, &sub_img) {
+            Ok(payload) => {
+                if let Err(error) = db_for_ocr.update_ocr(&pin_id_for_ocr, Some(&payload)) {
+                    eprintln!("No se pudo guardar el texto: {error}");
+                }
 
-                    let event_name = format!("ocr:ready:{}", pin_id_for_ocr);
-                    let _ = app_for_ocr.emit_to(format!("pin-{pin_id_for_ocr}"), &event_name, &payload);
-                    let _ = app_for_ocr.emit_to(format!("pin-toolbar-{pin_id_for_ocr}"), &event_name, payload);
-                }
-                Err(err) => {
-                    eprintln!("Aviso: fallo en OCR para {pin_id_for_ocr}: {err}");
-                    let _ = db_for_ocr.update_ocr(&pin_id_for_ocr, None);
-                    let event_name = format!("ocr:error:{}", pin_id_for_ocr);
-                    let _ = app_for_ocr.emit_to(format!("pin-{pin_id_for_ocr}"), &event_name, ());
-                    let _ = app_for_ocr.emit_to(format!("pin-toolbar-{pin_id_for_ocr}"), &event_name, ());
-                }
+                let event_name = format!("ocr:ready:{}", pin_id_for_ocr);
+                let _ = app_for_ocr.emit_to(format!("pin-{pin_id_for_ocr}"), &event_name, &payload);
+                let _ = app_for_ocr.emit_to(
+                    format!("pin-toolbar-{pin_id_for_ocr}"),
+                    &event_name,
+                    payload,
+                );
+            }
+            Err(err) => {
+                eprintln!("Aviso: fallo en OCR para {pin_id_for_ocr}: {err}");
+                let _ = db_for_ocr.update_ocr(&pin_id_for_ocr, None);
+                let event_name = format!("ocr:error:{}", pin_id_for_ocr);
+                let _ = app_for_ocr.emit_to(format!("pin-{pin_id_for_ocr}"), &event_name, ());
+                let _ =
+                    app_for_ocr.emit_to(format!("pin-toolbar-{pin_id_for_ocr}"), &event_name, ());
             }
         }
-        #[cfg(not(target_os = "windows"))]
-        let _ = db_for_ocr.update_ocr(&pin_id_for_ocr, None);
         let _ = app_for_ocr.emit("memory:changed", ());
     });
 
@@ -292,13 +301,13 @@ fn copy_pin_image(
         std::fs::read(&path).map_err(|e| format!("No se pudo leer la imagen: {e}"))?
     };
 
-    let img = image::load_from_memory(&bytes)
-        .map_err(|e| format!("Error procesando imagen: {e}"))?;
+    let img =
+        image::load_from_memory(&bytes).map_err(|e| format!("Error procesando imagen: {e}"))?;
     let rgba = img.to_rgba8();
     let (width, height) = rgba.dimensions();
 
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| format!("Error abriendo portapapeles: {e}"))?;
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Error abriendo portapapeles: {e}"))?;
     clipboard
         .set_image(arboard::ImageData {
             width: width as usize,
@@ -396,6 +405,10 @@ pub fn spawn_pin_window(
         .shadow(false)
         .build()
         .map_err(|e| format!("Fallo al instanciar ventana PinWindow: {e}"))?;
+    #[cfg(target_os = "macos")]
+    win.set_position(tauri::LogicalPosition::new(x, y))
+        .map_err(|e| e.to_string())?;
+    #[cfg(not(target_os = "macos"))]
     win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32))
         .map_err(|e| e.to_string())?;
     win.set_size(tauri::LogicalSize::new(w, h))
@@ -404,19 +417,21 @@ pub fn spawn_pin_window(
     let closed_app = app.clone();
     let closed_id = pin_id.to_owned();
     let follow_pin = win.clone();
-    win.on_window_event(move |event| {
-        match event {
-            tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
-                let _ = position_pin_toolbar(&follow_pin, &toolbar);
-            }
-            tauri::WindowEvent::Destroyed => {
-                let _ = toolbar.close();
-                closed_app.state::<Arc<CaptureState>>().release_crop(&closed_id);
-                let _ = closed_app.state::<Arc<MemoryDatabase>>().archive_pin(&closed_id);
-                let _ = closed_app.emit("memory:changed", ());
-            }
-            _ => {}
+    win.on_window_event(move |event| match event {
+        tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
+            let _ = position_pin_toolbar(&follow_pin, &toolbar);
         }
+        tauri::WindowEvent::Destroyed => {
+            let _ = toolbar.close();
+            closed_app
+                .state::<Arc<CaptureState>>()
+                .release_crop(&closed_id);
+            let _ = closed_app
+                .state::<Arc<MemoryDatabase>>()
+                .archive_pin(&closed_id);
+            let _ = closed_app.emit("memory:changed", ());
+        }
+        _ => {}
     });
     let _ = win.set_focus();
 
@@ -471,25 +486,64 @@ fn position_pin_toolbar(
     pin: &tauri::WebviewWindow,
     toolbar: &tauri::WebviewWindow,
 ) -> Result<(), String> {
-    let position = pin.outer_position().map_err(|e| e.to_string())?;
-    let pin_size = pin.outer_size().map_err(|e| e.to_string())?;
-    let size = toolbar.outer_size().map_err(|e| e.to_string())?;
-    let mut x = position.x + (pin_size.width as i32 - size.width as i32) / 2;
-    let below = position.y + pin_size.height as i32 + 2;
-    let mut y = below;
-    if let Some(monitor) = pin.current_monitor().map_err(|e| e.to_string())? {
-        let left = monitor.position().x;
-        let top = monitor.position().y;
-        let right = left + monitor.size().width as i32;
-        let bottom = top + monitor.size().height as i32;
-        x = x.clamp(left, (right - size.width as i32).max(left));
-        if below + size.height as i32 > bottom {
-            y = (position.y - size.height as i32 - 4).max(top);
+    #[cfg(target_os = "macos")]
+    {
+        let pin_scale = pin.scale_factor().map_err(|e| e.to_string())?;
+        let toolbar_scale = toolbar.scale_factor().map_err(|e| e.to_string())?;
+        let position = pin
+            .outer_position()
+            .map_err(|e| e.to_string())?
+            .to_logical::<f64>(pin_scale);
+        let pin_size = pin
+            .outer_size()
+            .map_err(|e| e.to_string())?
+            .to_logical::<f64>(pin_scale);
+        let size = toolbar
+            .outer_size()
+            .map_err(|e| e.to_string())?
+            .to_logical::<f64>(toolbar_scale);
+        let mut x = position.x + (pin_size.width - size.width) / 2.0;
+        let below = position.y + pin_size.height + 2.0;
+        let mut y = below;
+        if let Some(monitor) = pin.current_monitor().map_err(|e| e.to_string())? {
+            let scale = monitor.scale_factor();
+            let origin = monitor.position().to_logical::<f64>(scale);
+            let monitor_size = monitor.size().to_logical::<f64>(scale);
+            x = x.clamp(
+                origin.x,
+                (origin.x + monitor_size.width - size.width).max(origin.x),
+            );
+            if below + size.height > origin.y + monitor_size.height {
+                y = (position.y - size.height - 4.0).max(origin.y);
+            }
         }
+        return toolbar
+            .set_position(tauri::LogicalPosition::new(x, y))
+            .map_err(|e| e.to_string());
     }
-    toolbar
-        .set_position(tauri::PhysicalPosition::new(x, y))
-        .map_err(|e| e.to_string())
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let position = pin.outer_position().map_err(|e| e.to_string())?;
+        let pin_size = pin.outer_size().map_err(|e| e.to_string())?;
+        let size = toolbar.outer_size().map_err(|e| e.to_string())?;
+        let mut x = position.x + (pin_size.width as i32 - size.width as i32) / 2;
+        let below = position.y + pin_size.height as i32 + 2;
+        let mut y = below;
+        if let Some(monitor) = pin.current_monitor().map_err(|e| e.to_string())? {
+            let left = monitor.position().x;
+            let top = monitor.position().y;
+            let right = left + monitor.size().width as i32;
+            let bottom = top + monitor.size().height as i32;
+            x = x.clamp(left, (right - size.width as i32).max(left));
+            if below + size.height as i32 > bottom {
+                y = (position.y - size.height as i32 - 4).max(top);
+            }
+        }
+        toolbar
+            .set_position(tauri::PhysicalPosition::new(x, y))
+            .map_err(|e| e.to_string())
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -512,7 +566,35 @@ fn get_global_cursor_pos() -> Option<(i32, i32)> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn get_global_cursor_pos() -> Option<(i32, i32)> {
+    #[repr(C)]
+    struct CGPoint {
+        x: f64,
+        y: f64,
+    }
+    type CGEventRef = *mut std::ffi::c_void;
+    type CGEventSourceRef = *mut std::ffi::c_void;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGEventCreate(source: CGEventSourceRef) -> CGEventRef;
+        fn CGEventGetLocation(event: CGEventRef) -> CGPoint;
+        fn CFRelease(cf: *const std::ffi::c_void);
+    }
+
+    unsafe {
+        let event = CGEventCreate(std::ptr::null_mut());
+        if event.is_null() {
+            return None;
+        }
+        let point = CGEventGetLocation(event);
+        CFRelease(event as *const _);
+        Some((point.x.round() as i32, point.y.round() as i32))
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn get_global_cursor_pos() -> Option<(i32, i32)> {
     None
 }
@@ -523,26 +605,54 @@ fn is_cursor_near_pin_or_toolbar(
     pin_win: &tauri::WebviewWindow,
     toolbar_win: Option<&tauri::WebviewWindow>,
 ) -> bool {
-    let pin_margin = 60;
-    let tb_margin = 24;
-    if let (Ok(pos), Ok(size)) = (pin_win.outer_position(), pin_win.outer_size())
-        && cx >= pos.x - pin_margin
-        && cx <= pos.x + size.width as i32 + pin_margin
-        && cy >= pos.y - pin_margin
-        && cy <= pos.y + size.height as i32 + pin_margin
-    {
-        return true;
+    let pin_margin = 60.0;
+    let tb_margin = 24.0;
+
+    let scale = if cfg!(target_os = "macos") {
+        pin_win.scale_factor().unwrap_or(1.0)
+    } else {
+        1.0
+    };
+
+    if let (Ok(pos), Ok(size)) = (pin_win.outer_position(), pin_win.outer_size()) {
+        let x = pos.x as f64 / scale;
+        let y = pos.y as f64 / scale;
+        let w = size.width as f64 / scale;
+        let h = size.height as f64 / scale;
+        let cur_x = cx as f64;
+        let cur_y = cy as f64;
+
+        if cur_x >= x - pin_margin
+            && cur_x <= x + w + pin_margin
+            && cur_y >= y - pin_margin
+            && cur_y <= y + h + pin_margin
+        {
+            return true;
+        }
     }
 
-    if let Some(tb) = toolbar_win
-        && let (Ok(pos), Ok(size)) = (tb.outer_position(), tb.outer_size())
-        && cx >= pos.x - tb_margin
-        && cx <= pos.x + size.width as i32 + tb_margin
-        && cy >= pos.y - tb_margin
-        && cy <= pos.y + size.height as i32 + tb_margin
-    {
-        let _ = tb;
-        return true;
+    if let Some(tb) = toolbar_win {
+        let tb_scale = if cfg!(target_os = "macos") {
+            tb.scale_factor().unwrap_or(1.0)
+        } else {
+            1.0
+        };
+        if let (Ok(pos), Ok(size)) = (tb.outer_position(), tb.outer_size()) {
+            let x = pos.x as f64 / tb_scale;
+            let y = pos.y as f64 / tb_scale;
+            let w = size.width as f64 / tb_scale;
+            let h = size.height as f64 / tb_scale;
+            let cur_x = cx as f64;
+            let cur_y = cy as f64;
+
+            if cur_x >= x - tb_margin
+                && cur_x <= x + w + tb_margin
+                && cur_y >= y - tb_margin
+                && cur_y <= y + h + tb_margin
+            {
+                return true;
+            }
+        }
     }
 
     false
@@ -550,7 +660,8 @@ fn is_cursor_near_pin_or_toolbar(
 
 fn start_proximity_monitor(app: AppHandle) {
     std::thread::spawn(move || {
-        let mut last_near_map: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+        let mut last_near_map: std::collections::HashMap<String, bool> =
+            std::collections::HashMap::new();
 
         loop {
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -624,8 +735,16 @@ pub fn start_capture_flow(app: &AppHandle) -> Result<(), String> {
         let label = format!("overlay-{}", mon.id);
         let url = format!("/?view=overlay&monitor_id={}", mon.id);
 
-        let logical_x = mon.x as f64 / mon.scale_factor as f64;
-        let logical_y = mon.y as f64 / mon.scale_factor as f64;
+        let logical_x = if cfg!(target_os = "macos") {
+            mon.x as f64
+        } else {
+            mon.x as f64 / mon.scale_factor as f64
+        };
+        let logical_y = if cfg!(target_os = "macos") {
+            mon.y as f64
+        } else {
+            mon.y as f64 / mon.scale_factor as f64
+        };
         let logical_w = mon.width as f64 / mon.scale_factor as f64;
         let logical_h = mon.height as f64 / mon.scale_factor as f64;
 
@@ -646,9 +765,17 @@ pub fn start_capture_flow(app: &AppHandle) -> Result<(), String> {
             })?;
 
         let _ = win.set_focus();
-        // Positions are physical on the desktop, including mixed-DPI monitor layouts.
+        // macOS uses desktop points; Windows uses physical pixels.
+        #[cfg(target_os = "macos")]
+        win.set_position(tauri::LogicalPosition::new(logical_x, logical_y))
+            .map_err(|e| e.to_string())?;
+        #[cfg(not(target_os = "macos"))]
         win.set_position(tauri::PhysicalPosition::new(mon.x, mon.y))
             .map_err(|e| e.to_string())?;
+        #[cfg(target_os = "macos")]
+        win.set_size(tauri::LogicalSize::new(logical_w, logical_h))
+            .map_err(|e| e.to_string())?;
+        #[cfg(not(target_os = "macos"))]
         win.set_size(tauri::PhysicalSize::new(mon.width, mon.height))
             .map_err(|e| e.to_string())?;
     }
@@ -677,16 +804,20 @@ pub fn run() {
 
             if let Some(mon_str) = trimmed.strip_prefix("monitor-") {
                 if let Ok(mon_id) = mon_str.parse::<u32>()
-                    && let Some(bytes) = state_for_protocol.get_monitor_preview(mon_id) {
-                        return Response::builder()
-                            .status(StatusCode::OK)
-                            .header(CONTENT_TYPE, "image/jpeg")
-                            .header("Access-Control-Allow-Origin", "*")
-                            .body(bytes)
-                            .unwrap();
+                    && let Some(bytes) = state_for_protocol.get_monitor_preview(mon_id)
+                {
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header(CONTENT_TYPE, "image/jpeg")
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(bytes)
+                        .unwrap();
                 }
             } else if uuid::Uuid::parse_str(trimmed).is_err() {
-                return Response::builder().status(StatusCode::BAD_REQUEST).body(Vec::new()).unwrap();
+                return Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Vec::new())
+                    .unwrap();
             } else if let Some(bytes) = state_for_protocol.get_crop_bytes(trimmed) {
                 return Response::builder()
                     .status(StatusCode::OK)
@@ -736,44 +867,48 @@ pub fn run() {
             let mut shortcut_warnings = Vec::new();
             let gc_app = app.handle().clone();
             let gc_state = app.state::<Arc<CaptureState>>().inner().clone();
-            std::thread::spawn(move || loop {
-                if let Ok(paths) = db_for_gc.purge_expired_sensitive_pins() {
-                    let changed = !paths.is_empty();
-                    for path in paths {
-                        if let Some(id) = std::path::Path::new(&path).file_stem().and_then(|s| s.to_str()) {
-                            gc_state.release_crop(id);
-                            if let Some(win) = gc_app.get_webview_window(&format!("pin-{id}")) { let _ = win.close(); }
+            std::thread::spawn(move || {
+                loop {
+                    if let Ok(paths) = db_for_gc.purge_expired_sensitive_pins() {
+                        let changed = !paths.is_empty();
+                        for path in paths {
+                            if let Some(id) = std::path::Path::new(&path)
+                                .file_stem()
+                                .and_then(|s| s.to_str())
+                            {
+                                gc_state.release_crop(id);
+                                if let Some(win) = gc_app.get_webview_window(&format!("pin-{id}")) {
+                                    let _ = win.close();
+                                }
+                            }
+                            let _ = std::fs::remove_file(db_for_gc.data_dir.join(path));
                         }
-                        let _ = std::fs::remove_file(db_for_gc.data_dir.join(path));
+                        if changed {
+                            let _ = gc_app.emit("memory:changed", ());
+                        }
                     }
-                    if changed { let _ = gc_app.emit("memory:changed", ()); }
+                    std::thread::sleep(std::time::Duration::from_secs(60));
                 }
-                std::thread::sleep(std::time::Duration::from_secs(60));
             });
             // Bandeja del sistema (Tray Icon)
             let quit_i = MenuItem::with_id(app, "quit", "Salir de Screen-Pin", true, None::<&str>)?;
-            let memory_i = MenuItem::with_id(
-                app,
-                "memory",
-                "Abrir Memoria",
-                true,
-                None::<&str>,
-            )?;
-            let capture_i = MenuItem::with_id(
-                app,
-                "capture",
-                "Capturar Recorte",
-                true,
-                None::<&str>,
-            )?;
-            let restore_i = MenuItem::with_id(app, "restore", "Recuperar interacción", true, None::<&str>)?;
+            let memory_i = MenuItem::with_id(app, "memory", "Abrir Memoria", true, None::<&str>)?;
+            let capture_i =
+                MenuItem::with_id(app, "capture", "Capturar Recorte", true, None::<&str>)?;
+            let restore_i =
+                MenuItem::with_id(app, "restore", "Recuperar interacción", true, None::<&str>)?;
             let home_i = MenuItem::with_id(app, "home", "Abrir Screen-Pin", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&home_i, &capture_i, &memory_i, &restore_i, &quit_i])?;
+            let menu =
+                Menu::with_items(app, &[&home_i, &capture_i, &memory_i, &restore_i, &quit_i])?;
 
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().expect("Icono de Screen-Pin").clone())
+                .icon(
+                    app.default_window_icon()
+                        .expect("Icono de Screen-Pin")
+                        .clone(),
+                )
                 .menu(&menu)
-                .show_menu_on_left_click(false)
+                .show_menu_on_left_click(cfg!(target_os = "macos"))
                 .tooltip("Screen-Pin - Recortes flotantes con memoria")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => app.exit(0),
@@ -786,17 +921,19 @@ pub fn run() {
                     "restore" => restore_interaction(app),
                     "home" => {
                         if let Some(win) = app.get_webview_window("main") {
-                            let _ = win.show(); let _ = win.set_focus();
+                            let _ = win.show();
+                            let _ = win.set_focus();
                         }
                     }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
+                    if !cfg!(target_os = "macos")
+                        && let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
                     {
                         let app = tray.app_handle();
                         run_window_action(app, start_capture_flow);
@@ -806,30 +943,56 @@ pub fn run() {
 
             // Atajos Globales: Alt+Shift+S (Captura) y Alt+Shift+M (Memoria)
             let capture_shortcut: Shortcut = "alt+shift+s".parse().map_err(|e| {
-                tauri::Error::PluginInitialization("shortcut".to_string(), format!("Invalid shortcut: {e:?}"))
+                tauri::Error::PluginInitialization(
+                    "shortcut".to_string(),
+                    format!("Invalid shortcut: {e:?}"),
+                )
             })?;
             let memory_shortcut: Shortcut = "alt+shift+m".parse().map_err(|e| {
-                tauri::Error::PluginInitialization("shortcut".to_string(), format!("Invalid shortcut: {e:?}"))
+                tauri::Error::PluginInitialization(
+                    "shortcut".to_string(),
+                    format!("Invalid shortcut: {e:?}"),
+                )
             })?;
 
             let app_handle_cap = app.handle().clone();
-            if let Err(error) = app.global_shortcut().on_shortcut(capture_shortcut, move |_app, _shortcut, event| {
-                if event.state() == ShortcutState::Pressed {
+            if let Err(error) = app.global_shortcut().on_shortcut(
+                capture_shortcut,
+                move |_app, _shortcut, event| {
+                    if event.state() == ShortcutState::Pressed {
                         run_window_action(&app_handle_cap, start_capture_flow);
-                }
-            }) { eprintln!("No se pudo registrar Alt+Shift+S: {error}"); shortcut_warnings.push("capture".into()); }
+                    }
+                },
+            ) {
+                eprintln!("No se pudo registrar Alt+Shift+S: {error}");
+                shortcut_warnings.push("capture".into());
+            }
 
             let app_handle_mem = app.handle().clone();
-            if let Err(error) = app.global_shortcut().on_shortcut(memory_shortcut, move |_app, _shortcut, event| {
-                if event.state() == ShortcutState::Pressed {
-                        run_window_action(&app_handle_mem, show_memory_drawer);
-                }
-            }) { eprintln!("No se pudo registrar Alt+Shift+M: {error}"); shortcut_warnings.push("memory".into()); }
+            if let Err(error) =
+                app.global_shortcut()
+                    .on_shortcut(memory_shortcut, move |_app, _shortcut, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            run_window_action(&app_handle_mem, show_memory_drawer);
+                        }
+                    })
+            {
+                eprintln!("No se pudo registrar Alt+Shift+M: {error}");
+                shortcut_warnings.push("memory".into());
+            }
 
             let restore_shortcut: Shortcut = "alt+shift+g".parse()?;
-            if let Err(error) = app.global_shortcut().on_shortcut(restore_shortcut, move |app, _, event| {
-                if event.state() == ShortcutState::Pressed { restore_interaction(app); }
-            }) { eprintln!("No se pudo registrar Alt+Shift+G: {error}"); shortcut_warnings.push("restore".into()); }
+            if let Err(error) =
+                app.global_shortcut()
+                    .on_shortcut(restore_shortcut, move |app, _, event| {
+                        if event.state() == ShortcutState::Pressed {
+                            restore_interaction(app);
+                        }
+                    })
+            {
+                eprintln!("No se pudo registrar Alt+Shift+G: {error}");
+                shortcut_warnings.push("restore".into());
+            }
             app.manage(ShortcutWarnings(shortcut_warnings));
             start_proximity_monitor(app.handle().clone());
 
@@ -862,9 +1025,36 @@ fn dirs_fallback_data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("SCREEN_PIN_DATA_DIR") {
         return PathBuf::from(dir);
     }
+    #[cfg(target_os = "windows")]
     if let Some(dir) = std::env::var_os("APPDATA") {
-        PathBuf::from(dir).join("ScreenPin")
-    } else {
-        PathBuf::from("./data")
+        return PathBuf::from(dir).join("ScreenPin");
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join("Library")
+            .join("Application Support")
+            .join("ScreenPin");
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(data_home) = std::env::var_os("XDG_DATA_HOME") {
+        return PathBuf::from(data_home).join("ScreenPin");
+    } else if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home)
+            .join(".local")
+            .join("share")
+            .join("ScreenPin");
+    }
+    PathBuf::from("./data")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::crop_desktop_coordinate;
+
+    #[test]
+    fn places_retina_crop_in_desktop_points_without_scaling_monitor_origin() {
+        assert_eq!(crop_desktop_coordinate(-1440, 200, 2.0), -1340.0);
+        assert_eq!(crop_desktop_coordinate(100, 300, 1.5), 300.0);
     }
 }

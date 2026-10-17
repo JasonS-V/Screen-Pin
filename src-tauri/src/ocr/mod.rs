@@ -1,7 +1,24 @@
+pub mod macos_ocr;
 #[cfg(target_os = "windows")]
 mod technical_ocr;
 #[cfg(target_os = "windows")]
 pub mod windows_ocr;
+
+pub fn run_ocr(pin_id: &str, img: &image::RgbaImage) -> Result<OcrPayload, String> {
+    #[cfg(target_os = "windows")]
+    {
+        windows_ocr::run_windows_ocr(pin_id, img)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        macos_ocr::run_macos_ocr(pin_id, img)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        let _ = (pin_id, img);
+        Err("OCR no disponible en este sistema operativo".to_string())
+    }
+}
 
 use serde::{Deserialize, Serialize};
 

@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { isTauri, errorMessage } from '$lib/desktop';
+  import { isTauri, isMac, errorMessage } from '$lib/desktop';
   import { isEnabled as isAutostartEnabled, enable as enableAutostart, disable as disableAutostart } from '@tauri-apps/plugin-autostart';
   import { isSoundEnabled, setSoundEnabled, playClickSound } from '$lib/sound';
   import { i18n } from '$lib/i18n.svelte';
@@ -140,15 +140,15 @@
         <p class="section-intro">{i18n.t.shortcutsIntro}</p>
         <div class="shortcut-row">
           <div><strong>{i18n.t.newCrop}</strong>{#if shortcutWarnings.includes('capture')}<span class="shortcut-warning" role="status">{i18n.t.shortcutBusyButton}</span>{/if}</div>
-          <kbd>Alt + Shift + S</kbd>
+          <kbd>{isMac ? '⌥ + ⇧ + S' : 'Alt + Shift + S'}</kbd>
         </div>
         <div class="shortcut-row">
           <div><strong>{i18n.t.openMemory}</strong>{#if shortcutWarnings.includes('memory')}<span class="shortcut-warning" role="status">{i18n.t.shortcutBusyTray}</span>{/if}</div>
-          <kbd>Alt + Shift + M</kbd>
+          <kbd>{isMac ? '⌥ + ⇧ + M' : 'Alt + Shift + M'}</kbd>
         </div>
         <div class="shortcut-row">
           <div><strong>{i18n.t.restoreClicks}</strong>{#if shortcutWarnings.includes('restore')}<span class="shortcut-warning" role="status">{i18n.t.shortcutBusyRestore}</span>{/if}</div>
-          <kbd>Alt + Shift + G</kbd>
+          <kbd>{isMac ? '⌥ + ⇧ + G' : 'Alt + Shift + G'}</kbd>
         </div>
       </section>
     {:else}

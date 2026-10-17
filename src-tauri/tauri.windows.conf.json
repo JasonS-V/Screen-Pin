@@ -1,0 +1,15 @@
+{
+  "bundle": {
+    "resources": {
+      "resources/ocr/LICENSE": "resources/ocr/LICENSE",
+      "resources/ocr/LICENSE-Leptonica.txt": "resources/ocr/LICENSE-Leptonica.txt",
+      "resources/ocr/LICENSE-tesseract-rs.txt": "resources/ocr/LICENSE-tesseract-rs.txt",
+      "resources/ocr/NOTICE.md": "resources/ocr/NOTICE.md",
+      "resources/runtime/windows-x64/msvcp140.dll": "msvcp140.dll",
+      "resources/runtime/windows-x64/vcruntime140.dll": "vcruntime140.dll",
+      "resources/runtime/windows-x64/vcruntime140_1.dll": "vcruntime140_1.dll",
+      "resources/runtime/windows-x64/NOTICE.md": "resources/runtime/NOTICE.md",
+      "resources/runtime/windows-x64/Redist.txt": "resources/runtime/Redist.txt"
+    }
+  }
+}

@@ -21,17 +21,6 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": {
-      "resources/ocr/LICENSE": "resources/ocr/LICENSE",
-      "resources/ocr/LICENSE-Leptonica.txt": "resources/ocr/LICENSE-Leptonica.txt",
-      "resources/ocr/LICENSE-tesseract-rs.txt": "resources/ocr/LICENSE-tesseract-rs.txt",
-      "resources/ocr/NOTICE.md": "resources/ocr/NOTICE.md",
-      "resources/runtime/windows-x64/msvcp140.dll": "msvcp140.dll",
-      "resources/runtime/windows-x64/vcruntime140.dll": "vcruntime140.dll",
-      "resources/runtime/windows-x64/vcruntime140_1.dll": "vcruntime140_1.dll",
-      "resources/runtime/windows-x64/NOTICE.md": "resources/runtime/NOTICE.md",
-      "resources/runtime/windows-x64/Redist.txt": "resources/runtime/Redist.txt"
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -39,6 +28,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "infoPlist": "Info.plist"
+    },
     "windows": {
       "nsis": {
         "languages": ["Spanish", "English"],

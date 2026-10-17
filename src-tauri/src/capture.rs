@@ -69,6 +69,18 @@ impl CaptureState {
 
     /// Captura en paralelo todos los monitores activos en RAM antes de que cambie el foco de ventanas.
     pub fn freeze_all_monitors(&self) -> Result<Vec<MonitorInfo>, String> {
+        #[cfg(target_os = "macos")]
+        unsafe {
+            #[link(name = "CoreGraphics", kind = "framework")]
+            unsafe extern "C" {
+                fn CGPreflightScreenCaptureAccess() -> bool;
+                fn CGRequestScreenCaptureAccess() -> bool;
+            }
+            if !CGPreflightScreenCaptureAccess() && !CGRequestScreenCaptureAccess() {
+                return Err("Activa Grabación de pantalla para Screen-Pin en Ajustes del Sistema > Privacidad y Seguridad. Reinicia la aplicación si macOS lo solicita".into());
+            }
+        }
+
         let all_monitors = Monitor::all().map_err(|e| format!("Fallo al listar monitores: {e}"))?;
         let mut infos = Vec::new();
         let mut frames = HashMap::new();
@@ -79,10 +91,26 @@ impl CaptureState {
             let name = mon.name().map_err(|e| e.to_string())?;
             let x = mon.x().map_err(|e| e.to_string())?;
             let y = mon.y().map_err(|e| e.to_string())?;
-            let width = mon.width().map_err(|e| e.to_string())?;
-            let height = mon.height().map_err(|e| e.to_string())?;
+            let display_width = mon.width().map_err(|e| e.to_string())?;
             let is_primary = mon.is_primary().map_err(|e| e.to_string())?;
-            let scale_factor = mon.scale_factor().map_err(|e| e.to_string())?;
+
+            let img = mon
+                .capture_image()
+                .map_err(|e| format!("Fallo al capturar monitor: {e}"))?;
+
+            // xcap reports macOS display bounds in points, but screenshots in pixels.
+            #[cfg(target_os = "macos")]
+            let (width, height, scale_factor) = (
+                img.width(),
+                img.height(),
+                img.width() as f32 / display_width as f32,
+            );
+            #[cfg(not(target_os = "macos"))]
+            let (width, height, scale_factor) = (
+                display_width,
+                mon.height().map_err(|e| e.to_string())?,
+                mon.scale_factor().map_err(|e| e.to_string())?,
+            );
 
             let info = MonitorInfo {
                 id,
@@ -95,10 +123,6 @@ impl CaptureState {
                 is_primary,
             };
             infos.push(info);
-
-            let img = mon
-                .capture_image()
-                .map_err(|e| format!("Fallo al capturar monitor: {e}"))?;
 
             // Pre-codificar JPEG para visualización instantánea en overlay sin congelamientos
             let mut jpg_bytes = Vec::new();

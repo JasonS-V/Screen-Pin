@@ -1,4 +1,4 @@
-import { isTauri } from '$lib/desktop';
+import { isTauri, isMac } from '$lib/desktop';
 import { emit, listen } from '@tauri-apps/api/event';
 
 export type Locale = 'en' | 'es';
@@ -34,11 +34,13 @@ export const translations = {
     languageDesc: 'Choose interface language.',
     langEnglish: 'English',
     langSpanish: 'Español',
-    autostartLabel: 'Start with Windows',
-    autostartDesc: 'Launch Screen-Pin minimized to the tray when you turn on your PC.',
-    autostartAria: 'Start Screen-Pin with Windows',
-    autostartEnabledNotice: 'Windows autostart enabled',
-    autostartDisabledNotice: 'Windows autostart disabled',
+    autostartLabel: isMac ? 'Start at login' : 'Start with Windows',
+    autostartDesc: isMac
+      ? 'Launch Screen-Pin in the menu bar when logging in.'
+      : 'Launch Screen-Pin minimized to the tray when you turn on your PC.',
+    autostartAria: isMac ? 'Start Screen-Pin at login' : 'Start Screen-Pin with Windows',
+    autostartEnabledNotice: isMac ? 'Start at login enabled' : 'Windows autostart enabled',
+    autostartDisabledNotice: isMac ? 'Start at login disabled' : 'Windows autostart disabled',
     soundLabel: 'Sound effects (Tactile)',
     soundDesc: 'Play a tactile tile sound when clicking buttons and actions.',
     soundTestBtn: 'Test',
@@ -50,7 +52,7 @@ export const translations = {
     pinActionsAria: 'Pin actions',
     copyImage: 'Copy image',
     imageCopied: 'Image copied',
-    copyImageTitle: 'Copy image to clipboard (Ctrl+C)',
+    copyImageTitle: isMac ? 'Copy image to clipboard (⌘C)' : 'Copy image to clipboard (Ctrl+C)',
     copyText: 'Copy text',
     textCopied: 'Text copied',
     ocrLoading: 'Recognizing text…',
@@ -58,7 +60,9 @@ export const translations = {
     ocrEmpty: 'No text detected',
     copyAllText: 'Copy all text',
     ghost: 'Ghost',
-    ghostTitle: 'Pass clicks through. Restore with Alt+Shift+G or from tray.',
+    ghostTitle: isMac
+      ? 'Pass clicks through. Restore with ⌥+⇧+G or from menu bar.'
+      : 'Pass clicks through. Restore with Alt+Shift+G or from tray.',
     archive: 'Archive',
     archiveTitle: 'Save to Memory and close',
     floatingCropAria: 'Floating screen pin',
@@ -154,11 +158,13 @@ export const translations = {
     languageDesc: 'Elige el idioma de la interfaz.',
     langEnglish: 'English',
     langSpanish: 'Español',
-    autostartLabel: 'Arrancar con Windows',
-    autostartDesc: 'Inicia Screen-Pin minimizado en la bandeja al encender el equipo.',
-    autostartAria: 'Arrancar Screen-Pin con Windows',
-    autostartEnabledNotice: 'Arranque con Windows activado',
-    autostartDisabledNotice: 'Arranque automático desactivado',
+    autostartLabel: isMac ? 'Iniciar con el sistema' : 'Arrancar con Windows',
+    autostartDesc: isMac
+      ? 'Inicia Screen-Pin en la barra de menús al iniciar sesión.'
+      : 'Inicia Screen-Pin minimizado en la bandeja al encender el equipo.',
+    autostartAria: isMac ? 'Iniciar Screen-Pin con el sistema' : 'Arrancar Screen-Pin con Windows',
+    autostartEnabledNotice: isMac ? 'Inicio con el sistema activado' : 'Arranque con Windows activado',
+    autostartDisabledNotice: isMac ? 'Inicio automático desactivado' : 'Arranque automático desactivado',
     soundLabel: 'Efectos de sonido (Ficha)',
     soundDesc: 'Reproduce un sonido de ficha táctil al pulsar opciones y acciones.',
     soundTestBtn: 'Probar',
@@ -170,7 +176,7 @@ export const translations = {
     pinActionsAria: 'Acciones del recorte',
     copyImage: 'Copiar imagen',
     imageCopied: 'Imagen copiada',
-    copyImageTitle: 'Copiar imagen al portapapeles (Ctrl+C)',
+    copyImageTitle: isMac ? 'Copiar imagen al portapapeles (⌘C)' : 'Copiar imagen al portapapeles (Ctrl+C)',
     copyText: 'Copiar texto',
     textCopied: 'Texto copiado',
     ocrLoading: 'Reconociendo texto…',
@@ -178,7 +184,9 @@ export const translations = {
     ocrEmpty: 'No se detectó texto',
     copyAllText: 'Copiar todo el texto',
     ghost: 'Fantasma',
-    ghostTitle: 'Dejar pasar los clics. Recuperar con Alt+Shift+G o desde la bandeja.',
+    ghostTitle: isMac
+      ? 'Dejar pasar los clics. Recuperar con ⌥+⇧+G o desde la barra de menús.'
+      : 'Dejar pasar los clics. Recuperar con Alt+Shift+G o desde la bandeja.',
     archive: 'Archivar',
     archiveTitle: 'Guardar en Memoria y cerrar',
     floatingCropAria: 'Recorte de pantalla flotante',

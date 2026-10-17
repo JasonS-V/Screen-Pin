@@ -4663,6 +4663,7 @@ name = "screen-pin"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "cc",
  "image",
  "rusqlite",
  "serde",
