@@ -1,0 +1,47 @@
+name: macOS bundle
+
+on:
+  push:
+    branches: [codex/macos-v0.1.0]
+  workflow_dispatch:
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.24.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check frontend
+        run: pnpm check
+      - name: Build macOS app
+        run: pnpm tauri build --bundles app
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+      - name: Verify and archive app
+        run: |
+          app="src-tauri/target/release/bundle/macos/Screen-Pin.app"
+          test -x "$app/Contents/MacOS/screen-pin"
+          codesign --verify --deep --strict "$app"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "Screen-Pin_0.1.0_macos_${{ matrix.arch }}.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Screen-Pin_0.1.0_macos_${{ matrix.arch }}
+          path: Screen-Pin_0.1.0_macos_${{ matrix.arch }}.zip
+          if-no-files-found: error
