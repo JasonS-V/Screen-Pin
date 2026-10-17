@@ -311,7 +311,7 @@
           <span>Pegando…</span>
         {:else}
           <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
-          <span>Pegar en {targetWindow.app_name}</span>
+          <span class="paste-btn-text">Pegar en <strong>{targetWindow.app_name}</strong></span>
         {/if}
       </button>
     {/if}
@@ -330,21 +330,21 @@
       {/if}
     </button>
     <button
-      class="toolbar-btn"
+      class="toolbar-btn btn-compact"
       class:active={isGhostMode}
       onclick={toggleGhostMode}
       title="Dejar pasar los clics. Recuperar con Alt+Shift+G o desde la bandeja."
       aria-pressed={isGhostMode}
     >
-      Fantasma
+      <span>Fantasma</span>
     </button>
     <button
-      class="toolbar-btn"
+      class="toolbar-btn btn-compact"
       onclick={archivePin}
       disabled={busy}
       title="Guardar en Memoria y cerrar"
     >
-      Archivar
+      <span>Archivar</span>
     </button>
     {#if error}<span class="sr-only" role="alert">{error}</span>{/if}
   </main>
@@ -592,11 +592,11 @@
     align-items: center;
     gap: 4px;
     width: 100%;
-    max-width: 520px;
+    max-width: 532px;
     height: 38px;
     padding: 3px 4px;
     box-sizing: border-box;
-    overflow: visible;
+    overflow: hidden;
     color: var(--chassis-light);
     background: #191918;
     border: 1px solid #383835;
@@ -650,6 +650,15 @@
     align-items: center;
     justify-content: center;
     gap: 4px;
+    overflow: hidden;
+    box-sizing: border-box;
+  }
+
+  .toolbar-btn span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
   .btn-icon {
@@ -665,10 +674,16 @@
     color: var(--chassis-dark);
   }
 
+  .toolbar-btn.btn-compact {
+    flex: 0.75;
+  }
+
   .toolbar-btn.paste-btn {
+    flex: 1.6;
     border: 1px solid rgba(255, 138, 80, 0.45);
     color: #FFB380;
     background: rgba(255, 138, 80, 0.12);
+    padding: 0 8px;
   }
 
   .toolbar-btn.paste-btn:hover:not(:disabled) {
@@ -677,11 +692,22 @@
     border-color: var(--accent-focus, #FF8A50);
   }
 
+  .toolbar-btn.paste-btn strong {
+    color: #FFAE78;
+    font-weight: 700;
+  }
+
+  .toolbar-btn.paste-btn:hover:not(:disabled) strong {
+    color: #141413;
+  }
+
   .pin-paste-bar {
     position: absolute;
     bottom: 8px;
     left: 50%;
     transform: translateX(-50%);
+    max-width: calc(100% - 16px);
+    box-sizing: border-box;
     z-index: 35;
     pointer-events: auto;
     animation: pill-appear 220ms cubic-bezier(0.16, 1, 0.3, 1);
@@ -701,6 +727,8 @@
   .pin-paste-pill {
     display: inline-flex;
     align-items: center;
+    max-width: 100%;
+    box-sizing: border-box;
     gap: 6px;
     padding: 5px 12px;
     background: rgba(20, 20, 19, 0.92);
@@ -715,6 +743,18 @@
     transition: all 120ms ease;
     white-space: nowrap;
     user-select: none;
+    overflow: hidden;
+  }
+
+  .pin-paste-pill span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .pin-paste-pill .pill-icon {
+    flex-shrink: 0;
   }
 
   .pin-paste-pill:hover {

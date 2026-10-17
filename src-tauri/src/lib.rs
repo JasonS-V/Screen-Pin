@@ -487,7 +487,7 @@ fn show_pin_toolbar(
         let url = format!("/?view=pin-toolbar&pin_id={pin_id}");
         let win = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
             .title("Acciones del recorte")
-            .inner_size(530.0, 68.0)
+            .inner_size(560.0, 68.0)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)

@@ -167,8 +167,8 @@ pub fn find_target_window_at_point(_cx: i32, _cy: i32) -> Option<TargetWindowInf
 pub fn format_friendly_app_name(exe: &str, title: &str) -> String {
     let lower_exe = exe.to_lowercase();
     match lower_exe.as_str() {
-        "chrome" => "Google Chrome".into(),
-        "msedge" => "Microsoft Edge".into(),
+        "chrome" => "Chrome".into(),
+        "msedge" => "Edge".into(),
         "firefox" => "Firefox".into(),
         "brave" => "Brave".into(),
         "code" => "VS Code".into(),
@@ -187,7 +187,7 @@ pub fn format_friendly_app_name(exe: &str, title: &str) -> String {
         "obsidian" => "Obsidian".into(),
         "notion" => "Notion".into(),
         "spotify" => "Spotify".into(),
-        "teams" | "msteams" => "Microsoft Teams".into(),
+        "teams" | "msteams" => "Teams".into(),
         _ => {
             if !title.is_empty() {
                 if let Some(pos) = title.rfind(" - ") {
@@ -277,4 +277,21 @@ pub async fn send_paste_to_target_hwnd(target_hwnd: usize) -> Result<(), String>
 #[cfg(not(target_os = "windows"))]
 pub async fn send_paste_to_target_hwnd(_target_hwnd: usize) -> Result<(), String> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_friendly_app_name() {
+        assert_eq!(format_friendly_app_name("chrome", "New Tab - Google Chrome"), "Chrome");
+        assert_eq!(format_friendly_app_name("msedge", "Microsoft Edge"), "Edge");
+        assert_eq!(format_friendly_app_name("teams", "Microsoft Teams"), "Teams");
+        assert_eq!(format_friendly_app_name("code", "PinView.svelte - Screen Pin"), "VS Code");
+        assert_eq!(format_friendly_app_name("notepad", "Untitled - Notepad"), "Bloc de notas");
+        assert_eq!(format_friendly_app_name("unknown_app", "Doc - CustomApp"), "CustomApp");
+        assert_eq!(format_friendly_app_name("calc", ""), "Calc");
+        assert_eq!(format_friendly_app_name("", ""), "esta ventana");
+    }
 }
