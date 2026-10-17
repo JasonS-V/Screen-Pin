@@ -5,6 +5,7 @@
   import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
   import type { OcrLine, OcrPayload, PinRecord, SmartEntity } from '$lib/types';
   import { playClickSound } from '$lib/sound';
+  import { i18n } from '$lib/i18n.svelte';
 
   let { pinId, toolbar = false }: { pinId: string; toolbar?: boolean } = $props();
   let lines = $state<OcrLine[]>([]);
@@ -66,7 +67,7 @@
     if (!isTauri()) {
       if (!toolbar) {
         ocrStatus = 'error';
-        error = 'Abre este recorte en Screen-Pin para ver su imagen y texto.';
+        error = i18n.t.pinOpenInDesktop;
       } else {
         isVisible = true;
       }
@@ -154,7 +155,7 @@
       clearTimeout(imageFeedbackTimer);
       imageFeedbackTimer = setTimeout(() => { copyImageFeedback = false; }, 1600);
     } catch {
-      error = 'No se pudo copiar la imagen al portapapeles.';
+      error = i18n.t.copyImageError;
     }
   }
 
@@ -164,11 +165,11 @@
       playClickSound();
       await navigator.clipboard.writeText(fullText.trim());
       copyTextFeedback = true;
-      copyFeedback = 'Texto copiado';
+      copyFeedback = i18n.t.textCopied;
       clearTimeout(feedbackTimer);
       feedbackTimer = setTimeout(() => { copyTextFeedback = false; copyFeedback = ''; }, 1600);
     } catch {
-      error = 'No se pudo copiar el texto al portapapeles.';
+      error = i18n.t.copyTextError;
     }
   }
 
@@ -189,11 +190,11 @@
     try {
       playClickSound();
       await navigator.clipboard.writeText(text);
-      copyFeedback = `${label} copiado`;
+      copyFeedback = `${label} ${i18n.current === 'es' ? 'copiado' : 'copied'}`;
       copyTextFeedback = true;
       clearTimeout(feedbackTimer);
       feedbackTimer = setTimeout(() => { copyTextFeedback = false; copyFeedback = ''; }, 1600);
-    } catch { error = 'No se pudo copiar al portapapeles.'; }
+    } catch { error = i18n.t.clipboardError; }
   }
 
   async function toggleGhostMode() {
@@ -220,11 +221,14 @@
     if (event.key === 'Escape') { event.preventDefault(); void archivePin(); }
     else if ((event.target as HTMLElement).closest('button, input, textarea')) return;
     else if (event.altKey && event.key.toLowerCase() === 'g') { event.preventDefault(); void toggleGhostMode(); }
-    else if (event.key === 'Enter' && bankEntity?.kind === 'BankDigits') { event.preventDefault(); void copyQuickValue(bankEntity.value.clean_digits, 'Número'); }
+    else if (event.key === 'Enter' && bankEntity?.kind === 'BankDigits') {
+      event.preventDefault();
+      void copyQuickValue(bankEntity.value.clean_digits, i18n.current === 'es' ? 'Número' : 'Number');
+    }
   }
 </script>
 
-<svelte:head><title>Recorte · Screen-Pin</title></svelte:head>
+<svelte:head><title>{i18n.t.pinTitle}</title></svelte:head>
 <svelte:window onkeydown={handleKeydown} oncopy={handleCopy} bind:innerHeight={viewHeight} />
 
 {#if toolbar}
@@ -239,51 +243,51 @@
     class:is-visible={isVisible}
     class:has-error={!!error}
     title={error || undefined}
-    aria-label="Acciones del recorte"
+    aria-label={i18n.t.pinActionsAria}
   >
     <button
       class="toolbar-btn"
-      title="Copiar imagen al portapapeles (Ctrl+C)"
+      title={i18n.t.copyImageTitle}
       onclick={copyPinImageToClipboard}
     >
       {#if copyImageFeedback}
         <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-        <span>Imagen copiada</span>
+        <span>{i18n.t.imageCopied}</span>
       {:else}
         <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-        <span>Copiar imagen</span>
+        <span>{i18n.t.copyImage}</span>
       {/if}
     </button>
     <button
       class="toolbar-btn"
       disabled={!fullText.trim()}
-      title={ocrStatus === 'loading' ? 'Reconociendo texto…' : ocrStatus === 'error' ? 'Lectura no disponible' : ocrStatus === 'empty' ? 'No se detectó texto' : 'Copiar todo el texto'}
+      title={ocrStatus === 'loading' ? i18n.t.ocrLoading : ocrStatus === 'error' ? i18n.t.ocrError : ocrStatus === 'empty' ? i18n.t.ocrEmpty : i18n.t.copyAllText}
       onclick={copyAllText}
     >
       {#if copyTextFeedback}
         <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-        <span>Texto copiado</span>
+        <span>{i18n.t.textCopied}</span>
       {:else}
         <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-        <span>Copiar texto</span>
+        <span>{i18n.t.copyText}</span>
       {/if}
     </button>
     <button
       class="toolbar-btn"
       class:active={isGhostMode}
       onclick={toggleGhostMode}
-      title="Dejar pasar los clics. Recuperar con Alt+Shift+G o desde la bandeja."
+      title={i18n.t.ghostTitle}
       aria-pressed={isGhostMode}
     >
-      <span>Fantasma</span>
+      <span>{i18n.t.ghost}</span>
     </button>
     <button
       class="toolbar-btn"
       onclick={archivePin}
       disabled={busy}
-      title="Guardar en Memoria y cerrar"
+      title={i18n.t.archiveTitle}
     >
-      <span>Archivar</span>
+      <span>{i18n.t.archive}</span>
     </button>
     {#if error}<span class="sr-only" role="alert">{error}</span>{/if}
   </main>
@@ -295,37 +299,37 @@
   ondblclick={handleBackgroundDoubleClick}
   onmouseenter={handlePinMouseEnter}
   onmouseleave={handlePinMouseLeave}
-  aria-label="Recorte de pantalla flotante"
+  aria-label={i18n.t.floatingCropAria}
 >
   <div
     class="calibration-corner"
     class:is-scanning={ocrStatus === 'loading'}
     data-tauri-drag-region
-    title="Arrastrar para mover ventana"
+    title={i18n.t.dragWindowMove}
   ></div>
 
   <div
     class="window-drag-bar"
     data-tauri-drag-region
-    title="Arrastrar para mover ventana"
+    title={i18n.t.dragWindowMove}
   ></div>
 
   <div
     class="image-stage"
     data-tauri-drag-region
     role="region"
-    aria-label="Captura fijada en pantalla"
-    title="Arrastrar recorte"
+    aria-label={i18n.t.capturedImageAria}
+    title={i18n.t.dragCropTitle}
   >
     <img
       src={isTauri() ? assetUrl(pinId) : undefined}
-      alt="Captura fijada en pantalla"
+      alt={i18n.t.capturedImageAria}
       draggable="false"
-      onerror={() => { error = 'La imagen del recorte ya no está disponible.'; }}
+      onerror={() => { error = i18n.t.pinImageUnavailable; }}
     />
 
     {#if ocrStatus === 'ready'}
-      <div class="ocr-layer" aria-label="Texto extraído de la imagen">
+      <div class="ocr-layer" aria-label={i18n.t.extractedTextAria}>
         {#each lines as line, lineIndex}
           {#each line.words as word, wordIndex}
             <span

@@ -5,6 +5,7 @@
   import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
   import type { PinRecord } from '$lib/types';
   import { startDrag } from '@crabnebula/tauri-plugin-drag';
+  import { i18n } from '$lib/i18n.svelte';
 
   const desktop = isTauri();
   let pins = $state<PinRecord[]>([]);
@@ -67,7 +68,7 @@
       feedback = pin.id;
       clearTimeout(feedbackTimer);
       feedbackTimer = setTimeout(() => { feedback = ''; }, 1600);
-    } catch { error = 'No se pudo copiar el texto al portapapeles. Inténtalo de nuevo.'; }
+    } catch { error = i18n.t.memoryCopyTextError; }
   }
 
   async function copyImage(pin: PinRecord) {
@@ -78,7 +79,7 @@
       clearTimeout(imageFeedbackTimer);
       imageFeedbackTimer = setTimeout(() => { imageFeedback = ''; }, 1600);
     } catch {
-      error = 'No se pudo copiar la imagen al portapapeles.';
+      error = i18n.t.copyImageError;
     }
   }
 
@@ -119,53 +120,74 @@
 
   function age(timestamp: number) {
     const minutes = Math.max(0, Math.floor((now - timestamp) / 60));
-    if (minutes === 0) return 'Ahora';
-    if (minutes < 60) return `Hace ${minutes} min`;
-    if (minutes < 1440) return `Hace ${Math.floor(minutes / 60)} h`;
-    return new Date(timestamp * 1000).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+    if (minutes === 0) return i18n.t.timeNow;
+    if (minutes < 60) return i18n.t.timeMinutesAgo(minutes);
+    if (minutes < 1440) return i18n.t.timeHoursAgo(Math.floor(minutes / 60));
+    return new Date(timestamp * 1000).toLocaleDateString(i18n.current, { day: 'numeric', month: 'short' });
   }
   function retention(pin: PinRecord) {
-    if (pin.is_pinned_forever) return 'Conservado';
+    if (pin.is_pinned_forever) return i18n.t.keptForever;
     const minutes = Math.ceil(((pin.expires_at ?? now) - now) / 60);
-    return minutes > 0 ? `Se elimina en ${minutes} min` : 'Pendiente de limpieza';
+    return minutes > 0 ? i18n.t.expiresInMin(minutes) : i18n.t.pendingCleanup;
   }
   function label(pin: PinRecord) {
-    return pin.entity_type === 'BankDigits' ? 'Datos bancarios' : pin.entity_type === 'WifiCredential' ? 'Credencial' : 'Recorte';
+    return pin.entity_type === 'BankDigits' ? i18n.t.bankDigitsBadge : pin.entity_type === 'WifiCredential' ? i18n.t.wifiCredentialBadge : i18n.t.genericPinBadge;
   }
 </script>
 
-<svelte:head><title>Memoria · Screen-Pin</title></svelte:head>
+<svelte:head><title>{i18n.t.memoryTitle}</title></svelte:head>
 <svelte:window onfocus={() => { if (desktop) void loadPins(); }} />
 
 <main class="memory-shell">
   <header class="memory-header">
-    <div class="heading-row"><h1>Memoria</h1>
-      <button class="button new-button" disabled={!desktop || !!busy} onclick={() => action('trigger_capture')} aria-label="Nuevo recorte">+ <span>Nuevo recorte</span></button></div>
+    <div class="heading-row">
+      <div class="heading-title-group">
+        <h1>{i18n.t.memoryHeading}</h1>
+        <div class="lang-switch-pill" role="group" aria-label={i18n.t.languageLabel}>
+          <button
+            type="button"
+            class="lang-pill-btn"
+            class:active={i18n.current === 'en'}
+            title="Switch to English"
+            onclick={() => i18n.set('en')}
+          >EN</button>
+          <span class="lang-divider">/</span>
+          <button
+            type="button"
+            class="lang-pill-btn"
+            class:active={i18n.current === 'es'}
+            title="Cambiar a Español"
+            onclick={() => i18n.set('es')}
+          >ES</button>
+        </div>
+      </div>
+      <button class="button new-button" disabled={!desktop || !!busy} onclick={() => action('trigger_capture')} aria-label={i18n.t.newCrop}>+ <span>{i18n.t.newCrop}</span></button>
+    </div>
     <div class="search-box">
       <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="M13 13L17.5 17.5" /></svg>
-      <input type="search" bind:value={searchQuery} oninput={search} placeholder="Buscar recortes…" aria-label="Buscar en el texto de los recortes" />
+      <input type="search" bind:value={searchQuery} oninput={search} placeholder={i18n.t.searchPlaceholder} aria-label={i18n.t.searchAria} />
     </div>
-    <span class="sr-only" role="status">{isLoading ? 'Cargando recortes' : `${pins.length}${pins.length === 50 ? '+' : ''} recorte${pins.length === 1 ? '' : 's'}`}</span>
+    <span class="sr-only" role="status">{isLoading ? i18n.t.loadingPins : i18n.t.pinCount(pins.length, pins.length === 50)}</span>
   </header>
 
-  <section class="pins-feed" aria-label="Recortes guardados" aria-busy={isLoading}>
-    {#if error}<div class="notice error" role="alert">{error}<button class="retry" onclick={loadPins}>Reintentar</button></div>{/if}
+  <section class="pins-feed" aria-label={i18n.t.savedPinsAria} aria-busy={isLoading}>
+    {#if error}<div class="notice error" role="alert">{error}<button class="retry" onclick={loadPins}>{i18n.t.retry}</button></div>{/if}
     {#if !desktop}
       <div class="empty-state">
         <div class="empty-icon" aria-hidden="true">
           <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         </div>
-        <h2>Tu memoria vive en el escritorio</h2>
-        <p>Abre Screen-Pin para consultar tus capturas locales. Tus recortes no se cargan en esta vista previa.</p>
-        <a href="/" class="button">Volver al inicio</a>
+        <h2>{i18n.t.memoryDesktopTitle}</h2>
+        <p>{i18n.t.memoryDesktopDesc}</p>
+        <a href="/" class="button">{i18n.t.backToHome}</a>
       </div>
     {:else if isLoading && pins.length === 0}
-      <div class="loading-state" role="status">Cargando tus recortes…</div>
+      <div class="loading-state" role="status">{i18n.t.loadingYourPins}</div>
     {:else if !error && pins.length === 0}
-      <div class="empty-state"><h2>{searchQuery.trim() ? 'Sin coincidencias' : 'Aún no hay recortes'}</h2>
-        <p>{searchQuery.trim() ? 'Prueba con otra palabra.' : 'Crea un recorte para verlo aquí.'}</p>
-        {#if searchQuery.trim()}<button class="button" onclick={() => { searchQuery = ''; void loadPins(); }}>Limpiar búsqueda</button>
-        {:else}<button class="button primary" disabled={!!busy} onclick={() => action('trigger_capture')}>Crear mi primer recorte</button>{/if}
+      <div class="empty-state"><h2>{searchQuery.trim() ? i18n.t.noMatches : i18n.t.noPinsYet}</h2>
+        <p>{searchQuery.trim() ? i18n.t.tryAnotherKeyword : i18n.t.createPinPrompt}</p>
+        {#if searchQuery.trim()}<button class="button" onclick={() => { searchQuery = ''; void loadPins(); }}>{i18n.t.clearSearch}</button>
+        {:else}<button class="button primary" disabled={!!busy} onclick={() => action('trigger_capture')}>{i18n.t.createFirstPin}</button>{/if}
       </div>
     {:else}
       <ul class="cards-list">
@@ -176,20 +198,20 @@
               onclick={() => action('repin_from_memory', pin.id)}
               onpointerdown={(e) => handlePreviewPointerDown(e, pin)}
               disabled={!!busy}
-              title="Haz clic para volver a fijar o arrastrar recorte"
-              aria-label="Volver a fijar o arrastrar este recorte"
+              title={i18n.t.repinTitle}
+              aria-label={i18n.t.repinAria}
             >
               <img src={assetUrl(pin.id)} alt="" loading="lazy" draggable="false" />
               <span class="preview-label">
-                Fijar
+                {i18n.t.repinBadge}
                 <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="7" y1="17" x2="17" y2="7"/><polyline points="7 7 17 7 17 17"/></svg>
               </span>
             </button>
             <div class="card-content">
-              <div class="card-meta"><span class="type-label">{label(pin)}</span><time datetime={new Date(pin.created_at * 1000).toISOString()} title={new Date(pin.created_at * 1000).toLocaleString('es')}>{age(pin.created_at)}</time></div>
+              <div class="card-meta"><span class="type-label">{label(pin)}</span><time datetime={new Date(pin.created_at * 1000).toISOString()} title={new Date(pin.created_at * 1000).toLocaleString(i18n.current)}>{age(pin.created_at)}</time></div>
               {#if pin.raw_text.trim()}<p class="snippet" title={pin.raw_text}>{pin.raw_text.trim()}</p>
-              {:else if pin.ocr_status === 'pending'}<p class="ocr-note">Reconociendo texto…</p>
-              {:else if pin.ocr_status === 'error'}<p class="ocr-note">Lectura de texto no disponible</p>{/if}
+              {:else if pin.ocr_status === 'pending'}<p class="ocr-note">{i18n.t.ocrTextLoadingNote}</p>
+              {:else if pin.ocr_status === 'error'}<p class="ocr-note">{i18n.t.ocrTextErrorNote}</p>{/if}
               {#if pin.is_sensitive}
                 <div class="retention">
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -200,24 +222,24 @@
                 <button class="card-btn" onclick={() => copyImage(pin)}>
                   {#if imageFeedback === pin.id}
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                    <span>Imagen copiada</span>
+                    <span>{i18n.t.imageCopied}</span>
                   {:else}
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-                    <span>Copiar imagen</span>
+                    <span>{i18n.t.copyImage}</span>
                   {/if}
                 </button>
                 {#if pin.raw_text.trim()}
                   <button class="card-btn" onclick={() => copyText(pin)}>
                     {#if feedback === pin.id}
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                      <span>Texto copiado</span>
+                      <span>{i18n.t.textCopied}</span>
                     {:else}
                       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                      <span>Copiar texto</span>
+                      <span>{i18n.t.copyText}</span>
                     {/if}
                   </button>
                 {/if}
-                {#if pin.is_sensitive}<button class="card-btn retain" aria-pressed={pin.is_pinned_forever} disabled={!!busy} onclick={() => action('toggle_retention', pin.id)} title={pin.is_pinned_forever ? 'Volver a eliminar automáticamente en 30 minutos' : 'Conservar sin caducidad'}>{pin.is_pinned_forever ? 'Liberar' : 'Conservar'}</button>{/if}
+                {#if pin.is_sensitive}<button class="card-btn retain" aria-pressed={pin.is_pinned_forever} disabled={!!busy} onclick={() => action('toggle_retention', pin.id)} title={pin.is_pinned_forever ? i18n.t.releaseTitle : i18n.t.keepTitle}>{pin.is_pinned_forever ? i18n.t.releaseBtn : i18n.t.keepBtn}</button>{/if}
               </div>
             </div>
           </li>
@@ -225,13 +247,49 @@
       </ul>
     {/if}
   </section>
-  <span class="sr-only" role="status">{feedback ? 'Texto copiado al portapapeles' : ''}</span>
+  <span class="sr-only" role="status">{feedback ? i18n.t.textCopied : ''}</span>
 </main>
 
 <style>
   .memory-shell { display: flex; flex-direction: column; height: 100dvh; background: var(--chassis-dark); color: var(--chassis-light); }
   .memory-header { padding: 16px 16px 0; }
   .heading-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .heading-title-group { display: flex; align-items: center; gap: 10px; }
+  .lang-switch-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 4px;
+    background: #1b1b19;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .lang-pill-btn {
+    background: transparent;
+    border: none;
+    padding: 2px 5px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 120ms ease;
+  }
+  .lang-pill-btn:hover {
+    color: var(--chassis-light);
+  }
+  .lang-pill-btn.active {
+    background: var(--surface-secondary);
+    color: var(--accent-focus, #FF8A50);
+  }
+  .lang-divider {
+    color: #444440;
+    font-size: 10px;
+    padding: 0 1px;
+    user-select: none;
+  }
   h1 { font-weight: 600; letter-spacing: -.6px; font-size: 22px; }
   .new-button { font-size: 15px; padding: 5px 10px; } .new-button span { font-size: 11px; }
   .search-box { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; padding: 8px 10px; background: #1e1e1c; border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); }

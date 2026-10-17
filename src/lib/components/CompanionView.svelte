@@ -5,6 +5,7 @@
   import { isTauri, errorMessage } from '$lib/desktop';
   import { isEnabled as isAutostartEnabled, enable as enableAutostart, disable as disableAutostart } from '@tauri-apps/plugin-autostart';
   import { isSoundEnabled, setSoundEnabled, playClickSound } from '$lib/sound';
+  import { i18n } from '$lib/i18n.svelte';
 
   const desktop = isTauri();
   let busy = $state(false);
@@ -54,11 +55,11 @@
       if (autostart) {
         await disableAutostart();
         autostart = false;
-        successNotice = 'Arranque automático desactivado';
+        successNotice = i18n.t.autostartDisabledNotice;
       } else {
         await enableAutostart();
         autostart = true;
-        successNotice = 'Arranque con Windows activado';
+        successNotice = i18n.t.autostartEnabledNotice;
       }
       setTimeout(() => { successNotice = ''; }, 3000);
     } catch (cause) {
@@ -86,60 +87,104 @@
   }
 </script>
 
-<svelte:head><title>Screen-Pin · Atajos y configuración</title></svelte:head>
+<svelte:head><title>{i18n.t.companionTitle}</title></svelte:head>
 
 <main class="companion-shell">
   <header class="brand-row">
-    <div class="brand"><img src="/favicon.svg" width="28" height="28" alt="" /><span>Screen-Pin</span></div>
-    <div class="segmented-control" role="tablist" aria-label="Secciones de Screen-Pin">
-      <button
-        class="segmented-btn"
-        class:active={activeTab === 'shortcuts'}
-        role="tab"
-        aria-selected={activeTab === 'shortcuts'}
-        onclick={() => activeTab = 'shortcuts'}
-      >
-        Atajos
-      </button>
-      <button
-        class="segmented-btn"
-        class:active={activeTab === 'settings'}
-        role="tab"
-        aria-selected={activeTab === 'settings'}
-        onclick={() => activeTab = 'settings'}
-      >
-        Configuración
-      </button>
+    <div class="brand"><img src="/favicon.svg" width="28" height="28" alt="" /><span>{i18n.t.appName}</span></div>
+    <div class="header-actions">
+      <div class="lang-switch-pill" role="group" aria-label={i18n.t.languageLabel}>
+        <button
+          type="button"
+          class="lang-pill-btn"
+          class:active={i18n.current === 'en'}
+          title="Switch to English"
+          onclick={() => i18n.set('en')}
+        >EN</button>
+        <span class="lang-divider">/</span>
+        <button
+          type="button"
+          class="lang-pill-btn"
+          class:active={i18n.current === 'es'}
+          title="Cambiar a Español"
+          onclick={() => i18n.set('es')}
+        >ES</button>
+      </div>
+      <div class="segmented-control" role="tablist" aria-label={i18n.t.shortcutsTab}>
+        <button
+          class="segmented-btn"
+          class:active={activeTab === 'shortcuts'}
+          role="tab"
+          aria-selected={activeTab === 'shortcuts'}
+          onclick={() => activeTab = 'shortcuts'}
+        >
+          {i18n.t.shortcutsTab}
+        </button>
+        <button
+          class="segmented-btn"
+          class:active={activeTab === 'settings'}
+          role="tab"
+          aria-selected={activeTab === 'settings'}
+          onclick={() => activeTab = 'settings'}
+        >
+          {i18n.t.settingsTab}
+        </button>
+      </div>
     </div>
   </header>
 
   <div class="content-area">
     {#if activeTab === 'shortcuts'}
       <section class="tab-content" aria-labelledby="shortcuts-title">
-        <h1 id="shortcuts-title">Atajos de teclado</h1>
-        <p class="section-intro">Úsalos desde cualquier ventana de tu equipo.</p>
+        <h1 id="shortcuts-title">{i18n.t.keyboardShortcutsHeading}</h1>
+        <p class="section-intro">{i18n.t.shortcutsIntro}</p>
         <div class="shortcut-row">
-          <div><strong>Nuevo recorte</strong>{#if shortcutWarnings.includes('capture')}<span class="shortcut-warning" role="status">Atajo ocupado · usa el botón</span>{/if}</div>
+          <div><strong>{i18n.t.newCrop}</strong>{#if shortcutWarnings.includes('capture')}<span class="shortcut-warning" role="status">{i18n.t.shortcutBusyButton}</span>{/if}</div>
           <kbd>Alt + Shift + S</kbd>
         </div>
         <div class="shortcut-row">
-          <div><strong>Abrir memoria</strong>{#if shortcutWarnings.includes('memory')}<span class="shortcut-warning" role="status">Atajo ocupado · usa el botón o la bandeja</span>{/if}</div>
+          <div><strong>{i18n.t.openMemory}</strong>{#if shortcutWarnings.includes('memory')}<span class="shortcut-warning" role="status">{i18n.t.shortcutBusyTray}</span>{/if}</div>
           <kbd>Alt + Shift + M</kbd>
         </div>
         <div class="shortcut-row">
-          <div><strong>Recuperar clics</strong>{#if shortcutWarnings.includes('restore')}<span class="shortcut-warning" role="status">Atajo ocupado · abre Memoria o usa la bandeja</span>{/if}</div>
+          <div><strong>{i18n.t.restoreClicks}</strong>{#if shortcutWarnings.includes('restore')}<span class="shortcut-warning" role="status">{i18n.t.shortcutBusyRestore}</span>{/if}</div>
           <kbd>Alt + Shift + G</kbd>
         </div>
       </section>
     {:else}
       <section class="tab-content" aria-labelledby="settings-title">
-        <h1 id="settings-title">Configuración</h1>
-        <p class="section-intro">Preferencias de sistema y experiencia.</p>
+        <h1 id="settings-title">{i18n.t.settingsHeading}</h1>
+        <p class="section-intro">{i18n.t.settingsIntro}</p>
         
         <div class="setting-row">
           <div class="setting-text">
-            <strong>Arrancar con Windows</strong>
-            <span class="setting-desc">Inicia Screen-Pin minimizado en la bandeja al encender el equipo.</span>
+            <strong>{i18n.t.languageLabel}</strong>
+            <span class="setting-desc">{i18n.t.languageDesc}</span>
+          </div>
+          <div class="segmented-control" role="group" aria-label={i18n.t.languageLabel}>
+            <button
+              type="button"
+              class="segmented-btn"
+              class:active={i18n.current === 'en'}
+              onclick={() => i18n.set('en')}
+            >
+              {i18n.t.langEnglish}
+            </button>
+            <button
+              type="button"
+              class="segmented-btn"
+              class:active={i18n.current === 'es'}
+              onclick={() => i18n.set('es')}
+            >
+              {i18n.t.langSpanish}
+            </button>
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <strong>{i18n.t.autostartLabel}</strong>
+            <span class="setting-desc">{i18n.t.autostartDesc}</span>
           </div>
           <button
             type="button"
@@ -148,7 +193,7 @@
             class:checked={autostart}
             disabled={!desktop || autostartLoading}
             aria-checked={autostart}
-            aria-label="Arrancar Screen-Pin con Windows"
+            aria-label={i18n.t.autostartAria}
             onclick={toggleAutostart}
           >
             <span class="switch-thumb"></span>
@@ -157,18 +202,18 @@
 
         <div class="setting-row">
           <div class="setting-text">
-            <strong>Efectos de sonido (Ficha)</strong>
-            <span class="setting-desc">Reproduce un sonido de ficha táctil al pulsar opciones y acciones.</span>
+            <strong>{i18n.t.soundLabel}</strong>
+            <span class="setting-desc">{i18n.t.soundDesc}</span>
           </div>
           <div class="setting-actions">
             {#if soundActive}
               <button
                 type="button"
                 class="test-sound-btn"
-                title="Probar sonido de ficha"
+                title={i18n.t.soundTestTitle}
                 onclick={() => playClickSound()}
               >
-                Probar
+                {i18n.t.soundTestBtn}
               </button>
             {/if}
             <button
@@ -177,7 +222,7 @@
               class="switch-control"
               class:checked={soundActive}
               aria-checked={soundActive}
-              aria-label="Efectos de sonido táctiles"
+              aria-label={i18n.t.soundAria}
               onclick={toggleSound}
             >
               <span class="switch-thumb"></span>
@@ -190,17 +235,17 @@
 
   {#if successNotice}<p class="notice success" role="status">{successNotice}</p>{/if}
   {#if error}<p class="notice error" role="alert">{error}</p>{/if}
-  {#if !desktop}<p class="notice">Vista previa: las capturas, atajos y arranque automático requieren la aplicación de escritorio.</p>{/if}
+  {#if !desktop}<p class="notice">{i18n.t.previewOnlyNotice}</p>{/if}
 
   <footer class="companion-footer">
     <button class="button primary" disabled={!desktop || busy} onclick={() => run('trigger_capture')}>
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3H3V8M16 3H21V8M21 16V21H16M8 21H3V16M8 12H16M12 8V16" /></svg>
-      {busy ? 'Un momento…' : 'Nuevo recorte'}
+      {busy ? i18n.t.oneMoment : i18n.t.newCrop}
     </button>
     {#if desktop}
-      <button class="button memory-link" disabled={busy} onclick={() => run('open_memory_drawer')}>Abrir memoria</button>
+      <button class="button memory-link" disabled={busy} onclick={() => run('open_memory_drawer')}>{i18n.t.openMemory}</button>
     {:else}
-      <a class="button memory-link" href="/memory">Ver memoria</a>
+      <a class="button memory-link" href="/memory">{i18n.t.viewMemory}</a>
     {/if}
   </footer>
 </main>
@@ -229,6 +274,46 @@
     font-size: 14px;
     font-weight: 650;
     letter-spacing: -.3px;
+  }
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .lang-switch-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 4px;
+    background: #1b1b19;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .lang-pill-btn {
+    background: transparent;
+    border: none;
+    padding: 2px 5px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: inherit;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 120ms ease;
+  }
+  .lang-pill-btn:hover {
+    color: var(--chassis-light);
+  }
+  .lang-pill-btn.active {
+    background: var(--surface-secondary);
+    color: var(--accent-focus, #FF8A50);
+  }
+  .lang-divider {
+    color: #444440;
+    font-size: 10px;
+    padding: 0 1px;
+    user-select: none;
   }
   .segmented-control {
     display: flex;

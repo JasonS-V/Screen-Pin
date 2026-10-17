@@ -4,6 +4,7 @@
   import type { MonitorInfo, CropSelection } from '$lib/types';
   import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
   import { playClickSound } from '$lib/sound';
+  import { i18n } from '$lib/i18n.svelte';
 
   let { monitorId = 0 }: { monitorId?: number } = $props();
 
@@ -46,11 +47,11 @@
   const physicalH = $derived(Math.floor(selH * scaleFactor));
 
   onMount(async () => {
-    if (!isTauri()) { error = 'La captura está disponible en la aplicación de escritorio.'; return; }
+    if (!isTauri()) { error = i18n.t.overlayErrorNonDesktop; return; }
     try {
       const monitors = await invoke<MonitorInfo[]>('get_monitors');
       monitor = monitors.find((m) => m.id === monitorId) ?? null;
-      if (!monitor) error = 'No se encontró el monitor. Cancela y vuelve a capturar.';
+      if (!monitor) error = i18n.t.overlayErrorNoMonitor;
     } catch (err) {
       error = errorMessage(err);
     }
@@ -249,7 +250,7 @@
   onpointercancel={() => { isDragging = false; hasSelection = false; }}
   oncontextmenu={(e) => e.preventDefault()}
   role="region"
-  aria-label="Lienzo de selección de captura"
+  aria-label={i18n.t.overlayAria}
 >
   <!-- Fotograma congelado del monitor -->
   <img
@@ -257,9 +258,9 @@
     bind:this={bgImageEl}
     src={isTauri() ? assetUrl(`monitor-${monitorId}`) : undefined}
     crossorigin="anonymous"
-    alt="Pantalla congelada para recorte"
+    alt={i18n.t.frozenBgAlt}
     draggable="false"
-    onerror={() => { error = 'No se pudo cargar la pantalla. Cancela e inténtalo de nuevo.'; }}
+    onerror={() => { error = i18n.t.overlayBgLoadError; }}
     onload={() => {
       imgLoaded = true;
       updateLoupe(window.innerWidth / 2, window.innerHeight / 2);
@@ -317,14 +318,14 @@
   {/if}
 
   <div class="shortcut-hints">
-    <span><strong>Arrastrar</strong>: Delimitar área</span>
-    <span><strong>Esc / Clic Der.</strong>: Cancelar</span>
-    <span><strong>Flechas</strong>: Ajuste fino</span>
-    <span><strong>Espacio</strong>: Fijar ancla</span>
-    <span><strong>Enter</strong>: Confirmar</span>
+    <span><strong>{i18n.current === 'es' ? 'Arrastrar' : 'Drag'}</strong>: {i18n.current === 'es' ? 'Delimitar área' : 'Select area'}</span>
+    <span><strong>{i18n.current === 'es' ? 'Esc / Clic Der.' : 'Esc / Right-Click'}</strong>: {i18n.t.cancel}</span>
+    <span><strong>{i18n.current === 'es' ? 'Flechas' : 'Arrows'}</strong>: {i18n.current === 'es' ? 'Ajuste fino' : 'Fine tune'}</span>
+    <span><strong>{i18n.current === 'es' ? 'Espacio' : 'Space'}</strong>: {i18n.current === 'es' ? 'Fijar ancla' : 'Lock anchor'}</span>
+    <span><strong>Enter</strong>: {i18n.current === 'es' ? 'Confirmar' : 'Confirm'}</span>
   </div>
-  {#if error}<div class="capture-error" role="alert">{error}<button onclick={cancel}>Cancelar</button></div>{/if}
-  {#if isSaving}<div class="capture-saving" role="status">Guardando recorte…</div>{/if}
+  {#if error}<div class="capture-error" role="alert">{error}<button onclick={cancel}>{i18n.t.cancel}</button></div>{/if}
+  {#if isSaving}<div class="capture-saving" role="status">{i18n.t.savingCrop}</div>{/if}
 </main>
 
 <style>
