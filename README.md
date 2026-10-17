@@ -60,7 +60,11 @@ En macOS, genera la aplicación con `pnpm tauri build --bundles app`. Comprueba 
 
 La distribución Windows x64 incluye junto al ejecutable las bibliotecas de Microsoft C++ que necesita Tesseract. Conserva los archivos de esa carpeta al mover una compilación sin instalador. Su procedencia y mantenimiento se documentan en `src-tauri/resources/runtime/windows-x64/NOTICE.md`; al compilar para otra arquitectura deben sustituirse por las bibliotecas correspondientes.
 
-En compilaciones de desarrollo, `SCREEN_PIN_DATA_DIR` permite usar una carpeta de pruebas independiente. Las compilaciones de distribución siempre utilizan la carpeta normal.
+La edición portable de Windows se distribuye como una carpeta ZIP que contiene `screen-pin.exe`, las bibliotecas necesarias, `resources` y `portable.flag`. Descomprímela en una carpeta con permiso de escritura y ejecuta `screen-pin.exe`: las capturas y la base de datos quedarán en `data` dentro de esa misma carpeta. Mueve la carpeta completa para conservarlas. Sin `portable.flag`, la aplicación usa `%APPDATA%/ScreenPin`.
+
+La compilación de macOS se genera en ejecutores nativos mediante `.github/workflows/macos-bundle.yml`, con archivos ZIP separados para Apple Silicon e Intel. Las aplicaciones llevan firma ad hoc y aún no están notarizadas; macOS puede requerir autorización manual para abrirlas.
+
+En compilaciones de desarrollo, `SCREEN_PIN_DATA_DIR` permite usar una carpeta de pruebas independiente. Las compilaciones de distribución utilizan `%APPDATA%/ScreenPin` o `~/Library/Application Support/ScreenPin`, salvo la edición portable de Windows.
 
 ## Identidad visual
 

@@ -4,6 +4,8 @@ pub mod ocr;
 
 use capture::{CaptureState, CropSelection, MonitorInfo};
 use memory_db::{MemoryDatabase, PinRecord};
+#[cfg(target_os = "windows")]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1026,6 +1028,13 @@ fn dirs_fallback_data_dir() -> PathBuf {
         return PathBuf::from(dir);
     }
     #[cfg(target_os = "windows")]
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().and_then(portable_data_dir))
+    {
+        return dir;
+    }
+    #[cfg(target_os = "windows")]
     if let Some(dir) = std::env::var_os("APPDATA") {
         return PathBuf::from(dir).join("ScreenPin");
     }
@@ -1048,6 +1057,14 @@ fn dirs_fallback_data_dir() -> PathBuf {
     PathBuf::from("./data")
 }
 
+#[cfg(target_os = "windows")]
+fn portable_data_dir(executable_folder: &Path) -> Option<PathBuf> {
+    executable_folder
+        .join("portable.flag")
+        .is_file()
+        .then(|| executable_folder.join("data"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::crop_desktop_coordinate;
@@ -1056,5 +1073,16 @@ mod tests {
     fn places_retina_crop_in_desktop_points_without_scaling_monitor_origin() {
         assert_eq!(crop_desktop_coordinate(-1440, 200, 2.0), -1340.0);
         assert_eq!(crop_desktop_coordinate(100, 300, 1.5), 300.0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn portable_marker_selects_data_beside_executable() {
+        let folder = std::env::temp_dir().join(format!("screen-pin-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(super::portable_data_dir(&folder), None);
+        std::fs::write(folder.join("portable.flag"), "").unwrap();
+        assert_eq!(super::portable_data_dir(&folder), Some(folder.join("data")));
+        std::fs::remove_dir_all(folder).unwrap();
     }
 }
