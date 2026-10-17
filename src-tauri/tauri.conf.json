@@ -34,7 +34,7 @@
     },
     "windows": {
       "nsis": {
-        "languages": ["Spanish", "English"],
+        "languages": ["English"],
         "installerIcon": "icons/icon.ico",
         "uninstallerIcon": "icons/icon.ico",
         "headerImage": "nsis/header.bmp",
