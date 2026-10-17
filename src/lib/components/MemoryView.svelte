@@ -176,7 +176,7 @@
               onclick={() => action('repin_from_memory', pin.id)}
               onpointerdown={(e) => handlePreviewPointerDown(e, pin)}
               disabled={!!busy}
-              title="Arrastra para pegar en otra aplicación o haz clic para volver a fijar"
+              title="Haz clic para volver a fijar o arrastrar recorte"
               aria-label="Volver a fijar o arrastrar este recorte"
             >
               <img src={assetUrl(pin.id)} alt="" loading="lazy" draggable="false" />

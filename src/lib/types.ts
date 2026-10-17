@@ -65,10 +65,3 @@ export interface PinRecord {
   is_pinned_forever: boolean;
   ocr_status: 'pending' | 'ready' | 'error';
 }
-
-export interface TargetWindowInfo {
-  hwnd: number;
-  title: string;
-  app_name: string;
-  is_valid: boolean;
-}
