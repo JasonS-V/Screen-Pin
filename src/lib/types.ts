@@ -41,10 +41,6 @@ export interface MonitorInfo {
 
 export interface CropSelection {
   monitor_id: number;
-  logical_x: number;
-  logical_y: number;
-  logical_w: number;
-  logical_h: number;
   physical_x: number;
   physical_y: number;
   physical_w: number;
@@ -67,4 +63,5 @@ export interface PinRecord {
   is_sensitive: boolean;
   expires_at: number | null;
   is_pinned_forever: boolean;
+  ocr_status: 'pending' | 'ready' | 'error';
 }

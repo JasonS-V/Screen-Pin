@@ -41,4 +41,4 @@ Al seleccionar texto en el sticker, la caja de selección utiliza `rgba(20, 20, 
 
 1. **Chasis de Doble Anillo:** `border-radius: 2px`, `outline` interior de $1\text{ px}$ en `#141413`, borde exterior de $1\text{ px}$ en `#F4F3EF`, sombra de elevación `0 4px 12px rgba(0, 0, 0, 0.28)`.
 2. **Escuadra de Calibración:** Marca en "L" de $8\text{ px} \times 8\text{ px}$ en `#D95D1E` en la esquina superior izquierda. Parpadea durante escaneo OCR y queda fija al terminar; funciona como handle de arrastre seguro.
-3. **Barra HUD Contextual (28px):** Visible sólo en `:hover` o `:focus-within`. Despliega acciones rápidas (Copiar número, archivar, estado OCR).
+3. **Barra flotante independiente (330 × 44 px):** Sigue al recorte, se coloca debajo o encima según el espacio disponible y muestra Copiar texto, Fantasma y Archivar sin desplazamiento horizontal.

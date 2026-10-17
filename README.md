@@ -17,7 +17,7 @@ pnpm tauri dev
 
 - **Alt + Shift + S**: congela los monitores. Arrastra una zona para fijarla; **Esc** o clic derecho cancela.
 - **Flechas**: mueve el cursor de selección en pasos de 10 píxeles lógicos; **Shift + flechas**, de uno en uno. **Espacio** fija el ancla y **Enter** confirma.
-- El recorte permanece encima de otras ventanas. Arrastra desde la esquina ámbar o una zona sin texto. El texto reconocido se puede seleccionar y copiar; los controles aparecen al pasar el cursor o usar **Tab**.
+- El recorte permanece encima de otras ventanas. Arrastra desde la esquina ámbar o una zona sin texto. El texto reconocido se puede seleccionar y copiar; una barra flotante junto al recorte muestra **Copiar texto**, **Fantasma** y **Archivar**.
 - **Archivar**, **Esc** o doble clic sobre una zona sin texto guarda el recorte en memoria y cierra su ventana.
 - **Alt + Shift + M**: abre Memoria. Busca por el texto reconocido, copia el contenido o vuelve a fijar una captura. Volver a fijar un recorte ya abierto enfoca su ventana.
 - **Fantasma** permite que los clics atraviesen el recorte. **Alt + Shift + G**, abrir Memoria o el menú de la bandeja recupera la interacción.
@@ -58,3 +58,5 @@ En compilaciones de desarrollo, `SCREEN_PIN_DATA_DIR` permite usar una carpeta d
 ## Identidad visual
 
 La fuente del favicon y los iconos es `static/favicon.svg`. Para regenerar los iconos de Tauri: `pnpm tauri icon static/favicon.svg`. La interfaz utiliza fuentes del sistema y conserva la paleta carbón, papel y ámbar definida en `DESIGN.md`.
+
+El instalador NSIS usa `src-tauri/nsis/sidebar.bmp` en bienvenida y cierre, `src-tauri/nsis/header.bmp` en las páginas intermedias y `src-tauri/icons/icon.ico` como icono de instalación y desinstalación. Para generar el `.exe`: `pnpm tauri build --bundles nsis`.

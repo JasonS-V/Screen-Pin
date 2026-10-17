@@ -6,7 +6,25 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
-  plugins: [sveltekit()],
+  plugins: [
+    {
+      name: "tauri-index-html-rewrite",
+      configureServer(server) {
+        server.middlewares.use(
+          /** @param {any} req @param {any} _res @param {any} next */
+          (req, _res, next) => {
+            if (req.url && (req.url === "/index.html" || req.url.startsWith("/index.html?"))) {
+              req.url = req.url.replace(/^\/index\.html/, "") || "/";
+              if (!req.url.startsWith("/")) req.url = "/" + req.url;
+              req.originalUrl = req.url;
+            }
+            next();
+          }
+        );
+      },
+    },
+    sveltekit(),
+  ],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

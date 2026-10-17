@@ -29,6 +29,9 @@ uuid = { version = "1.28.0", features = ["v4", "fast-rng"] }
 windows = { version = "0.62.2", features = ["Media_Ocr", "Graphics_Imaging", "Storage_Streams"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+tesseract-rs = "0.4.0"
+
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration
 [profile.release]

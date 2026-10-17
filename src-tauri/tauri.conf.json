@@ -10,20 +10,44 @@
     "frontendDist": "../build"
   },
   "app": {
-    "windows": [],
+    "windows": [{
+      "label": "main", "title": "Screen-Pin", "width": 560, "height": 460,
+      "minWidth": 560, "minHeight": 460, "center": true, "backgroundColor": "#141413"
+    }],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: pinasset: http://pinasset.localhost; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-src 'none'"
     }
   },
   "bundle": {
     "active": true,
     "targets": "all",
+    "resources": {
+      "resources/ocr/LICENSE": "resources/ocr/LICENSE",
+      "resources/ocr/LICENSE-Leptonica.txt": "resources/ocr/LICENSE-Leptonica.txt",
+      "resources/ocr/LICENSE-tesseract-rs.txt": "resources/ocr/LICENSE-tesseract-rs.txt",
+      "resources/ocr/NOTICE.md": "resources/ocr/NOTICE.md",
+      "resources/runtime/windows-x64/msvcp140.dll": "msvcp140.dll",
+      "resources/runtime/windows-x64/vcruntime140.dll": "vcruntime140.dll",
+      "resources/runtime/windows-x64/vcruntime140_1.dll": "vcruntime140_1.dll",
+      "resources/runtime/windows-x64/NOTICE.md": "resources/runtime/NOTICE.md",
+      "resources/runtime/windows-x64/Redist.txt": "resources/runtime/Redist.txt"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "languages": ["Spanish", "English"],
+        "installerIcon": "icons/icon.ico",
+        "uninstallerIcon": "icons/icon.ico",
+        "headerImage": "nsis/header.bmp",
+        "uninstallerHeaderImage": "nsis/header.bmp",
+        "sidebarImage": "nsis/sidebar.bmp"
+      }
+    }
   }
 }

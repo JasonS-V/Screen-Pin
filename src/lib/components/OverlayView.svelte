@@ -1,12 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import type { MonitorInfo } from '$lib/types';
+  import type { MonitorInfo, CropSelection } from '$lib/types';
+  import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
 
   let { monitorId = 0 }: { monitorId?: number } = $props();
 
   let monitor = $state<MonitorInfo | null>(null);
   let imgLoaded = $state(false);
+  let error = $state('');
+  let isSaving = $state(false);
 
   // Coordenadas lógicas de selección dentro del lienzo
   let isDragging = $state(false);
@@ -38,15 +41,17 @@
 
   const scaleFactor = $derived(monitor?.scale_factor ?? window.devicePixelRatio ?? 1.0);
 
-  const physicalW = $derived(Math.round(selW * scaleFactor));
-  const physicalH = $derived(Math.round(selH * scaleFactor));
+  const physicalW = $derived(Math.floor(selW * scaleFactor));
+  const physicalH = $derived(Math.floor(selH * scaleFactor));
 
   onMount(async () => {
+    if (!isTauri()) { error = 'La captura está disponible en la aplicación de escritorio.'; return; }
     try {
       const monitors = await invoke<MonitorInfo[]>('get_monitors');
-      monitor = monitors.find((m) => m.id === monitorId) || monitors[0] || null;
+      monitor = monitors.find((m) => m.id === monitorId) ?? null;
+      if (!monitor) error = 'No se encontró el monitor. Cancela y vuelve a capturar.';
     } catch (err) {
-      console.error('Error al obtener información de monitor:', err);
+      error = errorMessage(err);
     }
   });
 
@@ -65,8 +70,8 @@
       ly = clientY - loupeSize - offset;
     }
 
-    loupeX = lx;
-    loupeY = ly;
+    loupeX = Math.max(0, lx);
+    loupeY = Math.max(0, Math.min(ly, window.innerHeight - loupeSize - 28));
 
     const ctx = loupeCanvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
@@ -117,11 +122,14 @@
   }
 
   function handlePointerDown(e: PointerEvent) {
+    if (isSaving || !imgLoaded || !monitor || (e.target as HTMLElement).closest('button')) return;
     if (e.button === 2) {
       cancel();
       return;
     }
     if (e.button !== 0) return;
+    containerEl?.setPointerCapture(e.pointerId);
+    isAnchorLocked = false;
 
     isDragging = true;
     startX = e.clientX;
@@ -133,9 +141,9 @@
   }
 
   function handlePointerMove(e: PointerEvent) {
-    if (isDragging) {
-      currentX = e.clientX;
-      currentY = e.clientY;
+    if (isDragging || !hasSelection) {
+      currentX = Math.max(0, Math.min(e.clientX, window.innerWidth));
+      currentY = Math.max(0, Math.min(e.clientY, window.innerHeight));
     }
     updateLoupe(e.clientX, e.clientY);
   }
@@ -143,8 +151,9 @@
   async function handlePointerUp(e: PointerEvent) {
     if (!isDragging) return;
     isDragging = false;
-    currentX = e.clientX;
-    currentY = e.clientY;
+    currentX = Math.max(0, Math.min(e.clientX, window.innerWidth));
+    currentY = Math.max(0, Math.min(e.clientY, window.innerHeight));
+    containerEl?.releasePointerCapture(e.pointerId);
 
     if (selW >= 4 && selH >= 4) {
       await commitCrop();
@@ -154,33 +163,22 @@
   }
 
   async function commitCrop() {
-    if (selW < 4 || selH < 4) return;
-
-    const originX = monitor?.x ?? 0;
-    const originY = monitor?.y ?? 0;
+    if (isSaving || !monitor || !imgLoaded || selW < 4 || selH < 4) return;
+    isSaving = true;
+    error = '';
 
     const physX = Math.floor(selX * scaleFactor);
     const physY = Math.floor(selY * scaleFactor);
     const physW = Math.max(1, Math.floor(selW * scaleFactor));
     const physH = Math.max(1, Math.floor(selH * scaleFactor));
 
-    const screenAbsX = originX + selX;
-    const screenAbsY = originY + selY;
-
     try {
-      await invoke('confirm_crop', {
-        monitorId,
-        logicalX: screenAbsX,
-        logicalY: screenAbsY,
-        logicalW: selW,
-        logicalH: selH,
-        physicalX: physX,
-        physicalY: physY,
-        physicalW: physW,
-        physicalH: physH,
-      });
+      const selection: CropSelection = { monitor_id: monitorId, physical_x: physX, physical_y: physY, physical_w: physW, physical_h: physH };
+      await invoke('confirm_crop', { selection });
     } catch (err) {
-      console.error('Error al confirmar recorte:', err);
+      error = errorMessage(err);
+    } finally {
+      isSaving = false;
     }
   }
 
@@ -188,11 +186,12 @@
     try {
       await invoke('cancel_capture');
     } catch (err) {
-      console.error('Error al cancelar captura:', err);
+      error = errorMessage(err);
     }
   }
 
   function handleKeydown(e: KeyboardEvent) {
+    if (e.repeat && e.key === 'Enter') return;
     if (e.key === 'Escape') {
       cancel();
       return;
@@ -244,6 +243,7 @@
   onpointerdown={handlePointerDown}
   onpointermove={handlePointerMove}
   onpointerup={handlePointerUp}
+  onpointercancel={() => { isDragging = false; hasSelection = false; }}
   oncontextmenu={(e) => e.preventDefault()}
   role="region"
   aria-label="Lienzo de selección de captura"
@@ -252,9 +252,11 @@
   <img
     class="frozen-bg"
     bind:this={bgImageEl}
-    src={`pinasset://localhost/monitor/${monitorId}`}
+    src={isTauri() ? assetUrl(`monitor-${monitorId}`) : undefined}
+    crossorigin="anonymous"
     alt="Pantalla congelada para recorte"
     draggable="false"
+    onerror={() => { error = 'No se pudo cargar la pantalla. Cancela e inténtalo de nuevo.'; }}
     onload={() => {
       imgLoaded = true;
       updateLoupe(window.innerWidth / 2, window.innerHeight / 2);
@@ -262,7 +264,7 @@
   />
 
   <!-- Velo de oscurecimiento exterior -->
-  <div class="dim-backdrop"></div>
+  {#if !hasSelection}<div class="dim-backdrop"></div>{/if}
 
   <!-- Caja de selección recortada -->
   {#if hasSelection && selW > 0 && selH > 0}
@@ -304,7 +306,7 @@
         <span class="loupe-coord">
           {Math.round(currentX * scaleFactor)}, {Math.round(currentY * scaleFactor)}
         </span>
-        <span class="loupe-color" style:color={currentColorHex}>
+        <span class="loupe-color">
           {currentColorHex}
         </span>
       </div>
@@ -318,10 +320,13 @@
     <span><strong>Espacio</strong>: Fijar ancla</span>
     <span><strong>Enter</strong>: Confirmar</span>
   </div>
+  {#if error}<div class="capture-error" role="alert">{error}<button onclick={cancel}>Cancelar</button></div>{/if}
+  {#if isSaving}<div class="capture-saving" role="status">Guardando recorte…</div>{/if}
 </main>
 
 <style>
   .overlay-container {
+    touch-action: none;
     position: fixed;
     inset: 0;
     width: 100vw;
@@ -464,6 +469,10 @@
   }
 
   .shortcut-hints {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100vw - 24px);
+    width: max-content;
     position: absolute;
     bottom: 12px;
     left: 50%;
@@ -483,4 +492,6 @@
   .shortcut-hints strong {
     color: #F4F3EF;
   }
+  .capture-error, .capture-saving { position: fixed; top: 24px; left: 50%; transform: translateX(-50%); max-width: calc(100vw - 48px); padding: 12px 16px; background: #141413; border: 1px solid #ff8a50; color: #f4f3ef; font-size: 13px; z-index: 10001; }
+  .capture-error button { margin-left: 12px; color: #ff8a50; background: none; border: 0; text-decoration: underline; cursor: pointer; }
 </style>

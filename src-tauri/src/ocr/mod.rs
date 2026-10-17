@@ -1,4 +1,6 @@
 #[cfg(target_os = "windows")]
+mod technical_ocr;
+#[cfg(target_os = "windows")]
 pub mod windows_ocr;
 
 use serde::{Deserialize, Serialize};
@@ -54,7 +56,9 @@ pub fn extract_smart_entities(full_text: &str) -> (Vec<SmartEntity>, bool) {
             .count();
 
         // Evita falsos positivos en párrafos largos exigiendo que la línea sea mayormente numérica
-        if (10..=24).contains(&digits_only.len()) && allowed_formatting * 10 >= line.len() * 7 {
+        if (10..=24).contains(&digits_only.len())
+            && allowed_formatting * 10 >= line.chars().count() * 7
+        {
             entities.push(SmartEntity::BankDigits {
                 raw: line.trim().to_string(),
                 clean_digits: digits_only,
@@ -63,14 +67,26 @@ pub fn extract_smart_entities(full_text: &str) -> (Vec<SmartEntity>, bool) {
         }
 
         // Detección de claves Wi-Fi o contraseñas
-        let lower = line.to_lowercase();
-        if lower.contains("pass") || lower.contains("clave") || lower.contains("password") || lower.contains("wpa") {
-            if let Some(pos) = line.find(':') {
-                let key = line[pos + 1..].trim().to_string();
-                if !key.is_empty() {
-                    entities.push(SmartEntity::WifiCredential { key });
-                    is_sensitive = true;
-                }
+        if let Some((label, value)) = line.split_once([':', '=']) {
+            let credential_label = label
+                .to_lowercase()
+                .split(|c: char| !c.is_alphanumeric())
+                .any(|word| {
+                    [
+                        "pass",
+                        "password",
+                        "clave",
+                        "contraseña",
+                        "contrasena",
+                        "wpa",
+                        "wpa2",
+                    ]
+                    .contains(&word)
+                });
+            let key = value.trim().to_string();
+            if credential_label && !key.is_empty() {
+                entities.push(SmartEntity::WifiCredential { key });
+                is_sensitive = true;
             }
         }
     }
@@ -128,5 +144,11 @@ mod tests {
 
         assert!(!is_sensitive);
         assert!(entities.is_empty());
+    }
+
+    #[test]
+    fn recognizes_spanish_credentials_without_matching_unrelated_words() {
+        assert!(extract_smart_entities("Contraseña: MiClave2026").1);
+        assert!(!extract_smart_entities("Compass: norte").1);
     }
 }

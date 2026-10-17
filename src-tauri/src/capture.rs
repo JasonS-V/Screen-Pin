@@ -27,6 +27,7 @@ pub struct CropSelection {
 
 #[derive(Clone, Default)]
 pub struct CaptureState {
+    pub capture_lock: Arc<Mutex<()>>,
     /// Buffers completos capturados de cada monitor indexados por monitor.id()
     pub monitor_frames: Arc<Mutex<HashMap<u32, RgbaImage>>>,
     /// Previews codificados en JPEG para visualización ultra rápida e instantánea en el overlay
@@ -38,8 +39,27 @@ pub struct CaptureState {
 }
 
 impl CaptureState {
+    pub fn get_monitors(&self) -> Result<Vec<MonitorInfo>, String> {
+        Ok(self.monitors.lock().map_err(|e| e.to_string())?.clone())
+    }
+
+    pub fn clear_frames(&self) {
+        if let Ok(mut frames) = self.monitor_frames.lock() {
+            frames.clear();
+        }
+        if let Ok(mut previews) = self.monitor_previews.lock() {
+            previews.clear();
+        }
+    }
+
+    pub fn release_crop(&self, id: &str) {
+        if let Ok(mut crops) = self.pinned_crops.lock() {
+            crops.remove(id);
+        }
+    }
     pub fn new() -> Self {
         Self {
+            capture_lock: Arc::new(Mutex::new(())),
             monitor_frames: Arc::new(Mutex::new(HashMap::new())),
             monitor_previews: Arc::new(Mutex::new(HashMap::new())),
             monitors: Arc::new(Mutex::new(Vec::new())),
@@ -76,13 +96,18 @@ impl CaptureState {
             };
             infos.push(info);
 
-            let img = mon.capture_image().map_err(|e| format!("Fallo al capturar monitor: {e}"))?;
+            let img = mon
+                .capture_image()
+                .map_err(|e| format!("Fallo al capturar monitor: {e}"))?;
 
             // Pre-codificar JPEG para visualización instantánea en overlay sin congelamientos
             let mut jpg_bytes = Vec::new();
             let mut cursor = std::io::Cursor::new(&mut jpg_bytes);
             let rgb_img = image::DynamicImage::ImageRgba8(img.clone()).to_rgb8();
-            if rgb_img.write_to(&mut cursor, image::ImageFormat::Jpeg).is_ok() {
+            if rgb_img
+                .write_to(&mut cursor, image::ImageFormat::Jpeg)
+                .is_ok()
+            {
                 previews.insert(id, jpg_bytes);
             }
 
@@ -107,7 +132,11 @@ impl CaptureState {
     }
 
     /// Extrae el rectángulo seleccionado del buffer en RAM y lo codifica a PNG en memoria
-    pub fn crop_and_store(&self, crop_id: &str, crop: CropSelection) -> Result<(Vec<u8>, RgbaImage), String> {
+    pub fn crop_and_store(
+        &self,
+        crop_id: &str,
+        crop: CropSelection,
+    ) -> Result<(Vec<u8>, RgbaImage), String> {
         let frames = self.monitor_frames.lock().map_err(|e| e.to_string())?;
         let frame = frames
             .get(&crop.monitor_id)
@@ -116,10 +145,13 @@ impl CaptureState {
         let frame_w = frame.width();
         let frame_h = frame.height();
 
-        let x = crop.physical_x.min(frame_w);
-        let y = crop.physical_y.min(frame_h);
-        let w = crop.physical_w.min(frame_w.saturating_sub(x)).max(1);
-        let h = crop.physical_h.min(frame_h.saturating_sub(y)).max(1);
+        let x = crop.physical_x;
+        let y = crop.physical_y;
+        if x >= frame_w || y >= frame_h || crop.physical_w == 0 || crop.physical_h == 0 {
+            return Err("La selección está vacía o fuera de la pantalla".into());
+        }
+        let w = crop.physical_w.min(frame_w - x);
+        let h = crop.physical_h.min(frame_h - y);
 
         let sub_img = image::imageops::crop_imm(frame, x, y, w, h).to_image();
 
@@ -171,6 +203,33 @@ mod tests {
     use image::{Rgba, RgbaImage};
 
     #[test]
+    fn rejects_empty_and_out_of_bounds_crops() {
+        let state = CaptureState::new();
+        state
+            .monitor_frames
+            .lock()
+            .unwrap()
+            .insert(0, RgbaImage::new(10, 10));
+        for (x, y, w, h) in [(10, 0, 2, 2), (0, 10, 2, 2), (0, 0, 0, 2)] {
+            assert!(
+                state
+                    .crop_and_store(
+                        "invalid",
+                        CropSelection {
+                            monitor_id: 0,
+                            physical_x: x,
+                            physical_y: y,
+                            physical_w: w,
+                            physical_h: h,
+                        }
+                    )
+                    .is_err()
+            );
+        }
+        assert!(state.get_crop_bytes("invalid").is_none());
+    }
+
+    #[test]
     fn test_coordinate_scaling_100_percent() {
         let (x, y, w, h) = calculate_physical_coords(100.0, 200.0, 400.0, 300.0, 0.0, 0.0, 1.0);
         assert_eq!((x, y, w, h), (100, 200, 400, 300));
@@ -186,8 +245,7 @@ mod tests {
     #[test]
     fn test_coordinate_scaling_150_percent_with_monitor_offset() {
         // Monitor secundario en X=1920, Y=0 con 150% DPI
-        let (x, y, w, h) =
-            calculate_physical_coords(2020.0, 100.0, 300.0, 200.0, 1920.0, 0.0, 1.5);
+        let (x, y, w, h) = calculate_physical_coords(2020.0, 100.0, 300.0, 200.0, 1920.0, 0.0, 1.5);
         // rel_x = 100 -> 100 * 1.5 = 150
         // rel_y = 100 -> 100 * 1.5 = 150
         // w = 300 * 1.5 = 450

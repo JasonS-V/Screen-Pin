@@ -1,178 +1,84 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
+  import { isTauri, errorMessage } from '$lib/desktop';
 
-  async function triggerCapture() {
-    try {
-      await invoke('trigger_capture');
-    } catch (err) {
-      console.error('Error al iniciar captura:', err);
-    }
-  }
+  const desktop = isTauri();
+  let busy = $state(false);
+  let error = $state('');
+  let shortcutWarnings = $state<string[]>([]);
+  onMount(() => {
+    if (!desktop) return;
+    invoke<string[]>('get_shortcut_warnings').then(value => { shortcutWarnings = value; }).catch(cause => { error = errorMessage(cause); });
+    const unlisten = listen<string>('app:error', event => { error = event.payload; });
+    return () => { void unlisten.then(fn => fn()); };
+  });
 
-  async function openMemory() {
-    try {
-      await invoke('open_memory_drawer');
-    } catch (err) {
-      console.error('Error al abrir memoria:', err);
-    }
+  async function run(command: string) {
+    if (busy || !desktop) return;
+    busy = true;
+    error = '';
+    try { await invoke(command); }
+    catch (cause) { error = errorMessage(cause); }
+    finally { busy = false; }
   }
 </script>
 
+<svelte:head><title>Screen-Pin · Atajos de teclado</title></svelte:head>
+
 <main class="companion-shell">
-  <header class="companion-header">
-    <div class="logo-mark">
-      <div class="optic-reticle"></div>
-    </div>
-    <div>
-      <h1 class="companion-title">Screen-Pin</h1>
-      <p class="companion-desc">El recorte que se queda flotando (con memoria)</p>
-    </div>
+  <header class="brand-row">
+    <div class="brand"><img src="/favicon.svg" width="28" height="28" alt="" /><span>Screen-Pin</span></div>
   </header>
 
-  <section class="shortcut-list">
-    <div class="shortcut-card">
-      <span class="key-combo"><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></span>
-      <span class="key-desc">Congelar y recortar pantalla</span>
+  <section class="shortcuts" aria-labelledby="page-title">
+    <h1 id="page-title">Atajos de teclado</h1>
+    <p class="shortcut-intro">Úsalos desde cualquier ventana.</p>
+    <div class="shortcut-row">
+      <div><strong>Nuevo recorte</strong>{#if shortcutWarnings.includes('capture')}<span class="shortcut-warning" role="status">Atajo ocupado · usa el botón</span>{/if}</div>
+      <kbd>Alt + Shift + S</kbd>
     </div>
-    <div class="shortcut-card">
-      <span class="key-combo"><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>M</kbd></span>
-      <span class="key-desc">Abrir cajón de Memoria</span>
+    <div class="shortcut-row">
+      <div><strong>Abrir memoria</strong>{#if shortcutWarnings.includes('memory')}<span class="shortcut-warning" role="status">Atajo ocupado · usa el botón o la bandeja</span>{/if}</div>
+      <kbd>Alt + Shift + M</kbd>
     </div>
-    <div class="shortcut-card">
-      <span class="key-combo"><kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>G</kbd></span>
-      <span class="key-desc">Alternar Modo Fantasma (Click-Through)</span>
+    <div class="shortcut-row">
+      <div><strong>Recuperar clics</strong>{#if shortcutWarnings.includes('restore')}<span class="shortcut-warning" role="status">Atajo ocupado · abre Memoria o usa la bandeja</span>{/if}</div>
+      <kbd>Alt + Shift + G</kbd>
     </div>
   </section>
 
+  {#if error}<p class="notice error" role="alert">{error}</p>{/if}
+  {#if !desktop}<p class="notice">Vista previa: las capturas y los atajos requieren la aplicación de escritorio.</p>{/if}
+
   <footer class="companion-footer">
-    <button type="button" class="action-btn" onclick={openMemory}>
-      Ver Memoria
+    <button class="button primary" disabled={!desktop || busy} onclick={() => run('trigger_capture')}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M8 3H3V8M16 3H21V8M21 16V21H16M8 21H3V16M8 12H16M12 8V16" /></svg>
+      {busy ? 'Un momento…' : 'Nuevo recorte'}
     </button>
-    <button type="button" class="action-btn primary" onclick={triggerCapture}>
-      Probar recorte ahora
-    </button>
+    {#if desktop}
+      <button class="button memory-link" disabled={busy} onclick={() => run('open_memory_drawer')}>Abrir memoria</button>
+    {:else}
+      <a class="button memory-link" href="/memory">Ver memoria</a>
+    {/if}
   </footer>
 </main>
 
 <style>
-  .companion-shell {
-    display: flex;
-    flex-direction: column;
-    justify-content: space-between;
-    min-height: 100vh;
-    padding: 24px;
-    background: #141413;
-    color: #F4F3EF;
-    box-sizing: border-box;
-  }
-
-  .companion-header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    border-bottom: 1px solid #262624;
-    padding-bottom: 16px;
-  }
-
-  .logo-mark {
-    width: 36px;
-    height: 36px;
-    border: 1px solid #F4F3EF;
-    outline: 1px solid #141413;
-    outline-offset: -2px;
-    border-radius: 2px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #262624;
-  }
-
-  .optic-reticle {
-    width: 12px;
-    height: 12px;
-    border-top: 2px solid #D95D1E;
-    border-left: 2px solid #D95D1E;
-  }
-
-  .companion-title {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    margin: 0;
-  }
-
-  .companion-desc {
-    font-size: 12px;
-    color: #A3A19A;
-    margin: 2px 0 0;
-  }
-
-  .shortcut-list {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-    margin: 24px 0;
-  }
-
-  .shortcut-card {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    background: #262624;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 10px 14px;
-  }
-
-  .key-combo {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    color: #F4F3EF;
-  }
-
-  kbd {
-    background: #141413;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 2px 6px;
-    font-family: inherit;
-    font-size: 11px;
-    color: #FF8A50;
-  }
-
-  .key-desc {
-    font-size: 12px;
-    color: #A3A19A;
-  }
-
-  .companion-footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-
-  .action-btn {
-    background: #262624;
-    color: #F4F3EF;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 8px 16px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    cursor: pointer;
-    transition: border-color 120ms ease;
-  }
-
-  .action-btn.primary {
-    border-color: #D95D1E;
-  }
-
-  .action-btn:hover {
-    border-color: #FF8A50;
-  }
-
-  .action-btn:focus-visible {
-    outline: 2px solid #FF8A50;
-    outline-offset: 1px;
-  }
+  .companion-shell { height: 100dvh; padding: 22px 28px; display: flex; flex-direction: column; overflow: hidden; background: var(--chassis-dark); color: var(--chassis-light); }
+  .brand-row, .brand, .shortcut-row, .companion-footer { display: flex; align-items: center; }
+  .brand-row { padding-bottom: 12px; border-bottom: 1px solid var(--border-color); }
+  .brand { gap: 8px; font-size: 14px; font-weight: 650; letter-spacing: -.3px; }
+  .shortcuts { padding: 22px 0; }
+  h1 { font-size: 23px; line-height: 1.2; font-weight: 600; letter-spacing: -.6px; }
+  .shortcut-intro { color: var(--text-secondary); font-size: 12px; margin: 6px 0 16px; }
+  .shortcut-row { justify-content: space-between; gap: 16px; min-height: 54px; padding: 10px 0; border-top: 1px solid var(--border-color); }
+  .shortcut-row > div { min-width: 0; }
+  .shortcut-row strong { display: block; font-size: 13px; font-weight: 500; }
+  .shortcut-row kbd { flex-shrink: 0; font-size: 11px; padding: 5px 8px; }
+  .shortcut-warning { display: block; margin-top: 4px; color: var(--accent-focus); font-size: 11px; }
+  .companion-footer { gap: 10px; margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border-color); }
+  .companion-footer .button { flex: 1; min-height: 40px; text-decoration: none; }
+  @media (max-width: 480px) { .companion-shell { padding: 18px; } .shortcut-row { gap: 8px; } .shortcut-row kbd { font-size: 10px; } }
 </style>

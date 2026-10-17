@@ -1,95 +1,115 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
-  import { getCurrentWindow } from '@tauri-apps/api/window';
-  import type { OcrLine, SmartEntity } from '$lib/types';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
+  import type { OcrLine, OcrPayload, PinRecord, SmartEntity } from '$lib/types';
 
-  let { pinId }: { pinId: string } = $props();
-
+  let { pinId, toolbar = false }: { pinId: string; toolbar?: boolean } = $props();
   let lines = $state<OcrLine[]>([]);
   let entities = $state<SmartEntity[]>([]);
+  let fullText = $state('');
   let ocrStatus = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
   let isGhostMode = $state(false);
-  let copyFeedback = $state<string | null>(null);
+  let copyFeedback = $state('');
+  let error = $state('');
+  let busy = $state(false);
+  let viewHeight = $state(0);
+  let feedbackTimer: ReturnType<typeof setTimeout>;
+  const bankEntity = $derived(entities.find(e => e.kind === 'BankDigits'));
 
-  const bankEntity = $derived(
-    entities.find(
-      (e): e is { kind: 'BankDigits'; value: { raw: string; clean_digits: string } } =>
-        e.kind === 'BankDigits'
-    )
-  );
-
-  const appWindow = getCurrentWindow();
+  function applyPayload(payload: OcrPayload) {
+    lines = payload.lines;
+    entities = payload.entities;
+    fullText = payload.full_text;
+    ocrStatus = fullText.trim() ? 'ready' : 'empty';
+  }
 
   onMount(() => {
-    const unlistenReady = listen<{ lines: OcrLine[]; entities: SmartEntity[] }>(
-      `ocr:ready:${pinId}`,
-      (event) => {
-        lines = event.payload.lines;
-        entities = event.payload.entities;
-        ocrStatus = lines.length > 0 ? 'ready' : 'empty';
-      }
-    );
-
-    const unlistenError = listen(`ocr:error:${pinId}`, () => {
-      ocrStatus = 'error';
-    });
-
-    return () => {
-      unlistenReady.then((fn) => fn());
-      unlistenError.then((fn) => fn());
-    };
+    if (!isTauri()) { ocrStatus = 'error'; error = 'Abre este recorte en Screen-Pin para ver su imagen y texto.'; return; }
+    let disposed = false;
+    const listeners: UnlistenFn[] = [];
+    async function initialize() {
+      try {
+        for (const [name, handler] of [
+          [`ocr:ready:${pinId}`, (event: { payload: OcrPayload }) => applyPayload(event.payload)],
+          [`ocr:error:${pinId}`, () => { ocrStatus = 'error'; }],
+          ['ghost:changed', (event: { payload: boolean }) => { isGhostMode = event.payload; }],
+        ] as const) {
+          const unlisten = await listen(name, handler as (event: { payload: unknown }) => void, { target: `${toolbar ? 'pin-toolbar' : 'pin'}-${pinId}` });
+          if (disposed) { unlisten(); return; }
+          listeners.push(unlisten);
+        }
+        const snapshot = await invoke<{ pin: PinRecord; entities: SmartEntity[] }>('get_pin', { pinId });
+        if (disposed || ocrStatus !== 'loading') return;
+        const pin = snapshot.pin;
+        if (pin.ocr_status === 'error') { ocrStatus = 'error'; return; }
+        if (pin.ocr_status === 'pending') return;
+        applyPayload({ pin_id: pinId, lines: pin.ocr_json ? JSON.parse(pin.ocr_json) : [], full_text: pin.raw_text, entities: snapshot.entities, is_sensitive: pin.is_sensitive });
+      } catch (cause) { if (!disposed) { ocrStatus = 'error'; error = errorMessage(cause); } }
+    }
+    void initialize();
+    return () => { disposed = true; listeners.forEach(fn => fn()); clearTimeout(feedbackTimer); };
   });
 
   async function archivePin() {
-    try {
-      await invoke('archive_pin_to_memory', { pinId });
-    } catch {
-      // Ignorar fallo de base de datos
-    }
-    await appWindow.close();
+    if (busy) return;
+    busy = true;
+    error = '';
+    try { await invoke('archive_pin_to_memory', { pinId }); }
+    catch (cause) { error = errorMessage(cause); }
+    finally { busy = false; }
   }
 
   function handleBackgroundDoubleClick(event: MouseEvent) {
-    const target = event.target as HTMLElement;
-    if (target.classList.contains('ocr-word')) return;
-    archivePin();
+    if ((event.target as HTMLElement).closest('.ocr-word, button') || window.getSelection()?.toString()) return;
+    void archivePin();
+  }
+
+  function handleCopy(event: ClipboardEvent) {
+    const text = window.getSelection()?.toString();
+    if (!text || !event.clipboardData) return;
+    event.clipboardData.setData('text/plain', text);
+    event.preventDefault();
   }
 
   async function copyQuickValue(text: string, label: string) {
-    await navigator.clipboard.writeText(text);
-    copyFeedback = `${label} copiado`;
-    setTimeout(() => {
-      copyFeedback = null;
-    }, 1400);
+    try {
+      await navigator.clipboard.writeText(text);
+      copyFeedback = `${label} copiado`;
+      clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => { copyFeedback = ''; }, 1600);
+    } catch { error = 'No se pudo copiar al portapapeles.'; }
   }
 
   async function toggleGhostMode() {
-    isGhostMode = !isGhostMode;
     try {
-      await invoke('toggle_ghost_mode', { pinId, enabled: isGhostMode });
-    } catch (e) {
-      console.warn('Error alternando modo fantasma:', e);
-    }
+      await invoke('toggle_ghost_mode', { pinId, enabled: !isGhostMode });
+    } catch (cause) { error = errorMessage(cause); }
   }
 
   function handleKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape' || event.key === 'Backspace') {
-      archivePin();
-    } else if (event.key === 'Enter' && bankEntity) {
-      copyQuickValue(bankEntity.value.clean_digits, 'Número');
-    } else if (
-      (event.altKey && event.key.toLowerCase() === 'g') ||
-      (event.altKey && event.key.toLowerCase() === 'f')
-    ) {
-      toggleGhostMode();
-    }
+    if (event.repeat) return;
+    if (event.key === 'Escape') { event.preventDefault(); void archivePin(); }
+    else if ((event.target as HTMLElement).closest('button, input, textarea')) return;
+    else if (event.altKey && event.key.toLowerCase() === 'g') { event.preventDefault(); void toggleGhostMode(); }
+    else if (event.key === 'Enter' && bankEntity?.kind === 'BankDigits') { event.preventDefault(); void copyQuickValue(bankEntity.value.clean_digits, 'Número'); }
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:head><title>Recorte · Screen-Pin</title></svelte:head>
+<svelte:window onkeydown={handleKeydown} oncopy={handleCopy} bind:innerHeight={viewHeight} />
 
+{#if toolbar}
+<main class="pin-toolbar" class:has-error={!!error} title={error || undefined} aria-label="Acciones del recorte">
+  <button class="toolbar-btn" disabled={!fullText.trim()} title={ocrStatus === 'loading' ? 'Reconociendo texto…' : ocrStatus === 'error' ? 'Lectura no disponible' : ocrStatus === 'empty' ? 'No se detectó texto' : 'Copiar todo el texto'} onclick={() => copyQuickValue(fullText, 'Texto')}>
+    {copyFeedback ? 'Copiado ✓' : 'Copiar texto'}
+  </button>
+  <button class="toolbar-btn" class:active={isGhostMode} onclick={toggleGhostMode} title="Dejar pasar los clics. Recuperar con Alt+Shift+G o desde la bandeja." aria-pressed={isGhostMode}>Fantasma</button>
+  <button class="toolbar-btn" onclick={archivePin} disabled={busy} title="Guardar en Memoria y cerrar">Archivar</button>
+  {#if error}<span class="sr-only" role="alert">{error}</span>{/if}
+</main>
+{:else}
 <main
   class="pin-chassis"
   class:is-ghost={isGhostMode}
@@ -105,71 +125,35 @@
 
   <div class="image-stage" data-tauri-drag-region>
     <img
-      src={`pinasset://localhost/${pinId}`}
+      src={isTauri() ? assetUrl(pinId) : undefined}
       alt="Captura fijada en pantalla"
       draggable="false"
+      onerror={() => { error = 'La imagen del recorte ya no está disponible.'; }}
     />
 
     {#if ocrStatus === 'ready'}
       <div class="ocr-layer" aria-label="Texto extraído de la imagen">
-        {#each lines as line}
-          {#each line.words as word}
+        {#each lines as line, lineIndex}
+          {#each line.words as word, wordIndex}
             <span
               class="ocr-word"
               style:left="{word.bounds.x * 100}%"
               style:top="{word.bounds.y * 100}%"
               style:width="{word.bounds.width * 100}%"
               style:height="{word.bounds.height * 100}%"
+              style:font-size="{Math.max(1, word.bounds.height * viewHeight * 0.85)}px"
             >
-              {word.text}{" "}
+              {word.text}{wordIndex < line.words.length - 1 ? ' ' : lineIndex < lines.length - 1 ? '\n' : ''}
             </span>
           {/each}
         {/each}
       </div>
     {/if}
   </div>
-
-  <footer class="pin-hud">
-    {#if copyFeedback}
-      <span class="status-msg" role="status">{copyFeedback}</span>
-    {:else if ocrStatus === 'loading'}
-      <span class="status-msg">Procesando texto...</span>
-    {:else if ocrStatus === 'error'}
-      <span class="status-msg error">Contraste bajo para lectura</span>
-    {:else if ocrStatus === 'empty'}
-      <span class="status-msg">Sin texto detectable</span>
-    {:else if bankEntity}
-      <button
-        type="button"
-        class="hud-btn primary-extract"
-        onclick={() => copyQuickValue(bankEntity.value.clean_digits, 'Número limpio')}
-      >
-        Copiar {bankEntity.value.clean_digits}
-      </button>
-    {/if}
-
-    <div class="hud-actions">
-      <button
-        type="button"
-        class="hud-btn"
-        class:active={isGhostMode}
-        onclick={toggleGhostMode}
-        title="Modo Fantasma (Alt+G)"
-      >
-        Fantasma
-      </button>
-
-      <button
-        type="button"
-        class="hud-btn close-btn"
-        onclick={archivePin}
-        aria-label="Archivar en memoria y cerrar"
-      >
-        Archivar
-      </button>
-    </div>
-  </footer>
+  {#if error}<span class="pin-error" role="alert">{error}</span>{/if}
+  {#if copyFeedback}<span class="sr-only" role="status">{copyFeedback}</span>{/if}
 </main>
+{/if}
 
 <style>
   :global(:root) {
@@ -244,17 +228,19 @@
   }
 
   .ocr-layer {
+    pointer-events: none;
     position: absolute;
     inset: 0;
     user-select: text;
   }
 
   .ocr-word {
+    pointer-events: auto;
     position: absolute;
     color: transparent;
     font-family: 'JetBrains Mono', monospace;
     line-height: 1;
-    white-space: nowrap;
+    white-space: pre;
     cursor: text;
     border-bottom: 1px solid transparent;
     transition: border-color 100ms ease;
@@ -266,74 +252,15 @@
   }
 
   .ocr-word::selection {
-    background-color: rgba(20, 20, 19, 0.90);
-    color: var(--chassis-light);
+    background-color: rgba(255, 138, 80, 0.3);
+    color: transparent;
   }
 
-  .pin-hud {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    min-height: 28px;
-    background-color: var(--chassis-dark);
-    color: var(--chassis-light);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 2px 6px;
-    gap: 6px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 100ms ease;
-    z-index: 25;
-  }
-
-  .pin-chassis:hover .pin-hud,
-  .pin-chassis:focus-within .pin-hud {
-    opacity: 1;
-    pointer-events: auto;
-  }
-
-  .status-msg {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    color: #A3A19A;
-  }
-
-  .status-msg.error {
-    color: var(--accent-amber);
-  }
-
-  .hud-actions {
-    display: flex;
-    gap: 4px;
-    align-items: center;
-  }
-
-  .hud-btn {
-    background: #262624;
-    color: var(--chassis-light);
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 2px 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .hud-btn.active {
-    background: var(--accent-amber);
-    color: var(--chassis-light);
-    border-color: var(--accent-amber);
-  }
-
-  .hud-btn.primary-extract {
-    border-color: var(--accent-amber);
-  }
-
-  .hud-btn:focus-visible {
-    outline: 2px solid var(--accent-focus);
-    outline-offset: 1px;
-  }
+  .pin-error { position: absolute; bottom: 4px; left: 4px; right: 4px; z-index: 25; padding: 5px 7px; color: var(--accent-focus); background: var(--chassis-dark); font-size: 11px; overflow-wrap: anywhere; }
+  .pin-toolbar { display: flex; align-items: center; gap: 4px; width: 100vw; height: 100vh; padding: 4px; overflow: hidden; color: var(--chassis-light); background: var(--chassis-dark); border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 0, 0, .28); }
+  .pin-toolbar.has-error { border-color: var(--accent-focus); }
+  .toolbar-btn { flex: 1; min-width: 0; height: 32px; border: 0; border-radius: 3px; background: var(--surface-secondary); color: var(--chassis-light); font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+  .toolbar-btn:hover:not(:disabled) { background: #393936; }
+  .toolbar-btn.active { background: var(--accent-focus); color: var(--chassis-dark); }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 </style>

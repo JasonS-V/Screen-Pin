@@ -1,503 +1,171 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
   import type { PinRecord } from '$lib/types';
 
+  const desktop = isTauri();
   let pins = $state<PinRecord[]>([]);
   let searchQuery = $state('');
   let isLoading = $state(true);
-  let copyFeedback = $state<string | null>(null);
+  let error = $state('');
+  let feedback = $state('');
+  let busy = $state('');
+  let now = $state(Date.now() / 1000);
+  let requestId = 0;
+  let searchTimer: ReturnType<typeof setTimeout>;
+  let feedbackTimer: ReturnType<typeof setTimeout>;
 
-  onMount(async () => {
-    await loadPins();
+  onMount(() => {
+    let disposed = false;
+    let unlisten: UnlistenFn | undefined;
+    const clock = setInterval(() => { now = Date.now() / 1000; }, 30000);
+    if (desktop) {
+      listen('memory:changed', () => { void loadPins(); }).then(fn => {
+        if (disposed) fn(); else unlisten = fn;
+      }).catch(cause => { error = errorMessage(cause); });
+    }
+    void loadPins();
+    return () => { disposed = true; requestId++; unlisten?.(); clearInterval(clock); clearTimeout(searchTimer); clearTimeout(feedbackTimer); };
   });
 
   async function loadPins() {
+    const id = ++requestId;
     isLoading = true;
+    if (!desktop) { isLoading = false; return; }
     try {
-      pins = await invoke<PinRecord[]>('get_memory_pins');
-    } catch (e) {
-      console.error('Error al cargar memoria:', e);
-    } finally {
-      isLoading = false;
-    }
+      const query = searchQuery.trim();
+      const result = await invoke<PinRecord[]>(query ? 'search_memory_pins' : 'get_memory_pins', query ? { query } : {});
+      if (id === requestId) { pins = result; error = ''; }
+    } catch (cause) { if (id === requestId) error = errorMessage(cause); }
+    finally { if (id === requestId) isLoading = false; }
   }
 
-  async function handleSearch() {
+  function search() {
+    requestId++;
+    clearTimeout(searchTimer);
+    isLoading = true;
+    searchTimer = setTimeout(loadPins, 180);
+  }
+
+  async function action(command: string, pinId = '') {
+    if (busy || !desktop) return;
+    busy = pinId || command;
+    error = '';
+    try { await invoke(command, pinId ? { pinId } : {}); if (command === 'toggle_retention') await loadPins(); }
+    catch (cause) { error = errorMessage(cause); }
+    finally { busy = ''; }
+  }
+
+  async function copyText(pin: PinRecord) {
     try {
-      if (searchQuery.trim().length === 0) {
-        pins = await invoke<PinRecord[]>('get_memory_pins');
-      } else {
-        pins = await invoke<PinRecord[]>('search_memory_pins', { query: searchQuery });
-      }
-    } catch (e) {
-      console.error('Error en búsqueda FTS5:', e);
-    }
+      await navigator.clipboard.writeText(pin.raw_text.trim());
+      feedback = pin.id;
+      clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => { feedback = ''; }, 1600);
+    } catch { error = 'No se pudo copiar el texto al portapapeles. Inténtalo de nuevo.'; }
   }
 
-  async function copyText(text: string, id: string) {
-    await navigator.clipboard.writeText(text);
-    copyFeedback = id;
-    setTimeout(() => {
-      copyFeedback = null;
-    }, 1200);
+  function age(timestamp: number) {
+    const minutes = Math.max(0, Math.floor((now - timestamp) / 60));
+    if (minutes === 0) return 'Ahora';
+    if (minutes < 60) return `Hace ${minutes} min`;
+    if (minutes < 1440) return `Hace ${Math.floor(minutes / 60)} h`;
+    return new Date(timestamp * 1000).toLocaleDateString('es', { day: 'numeric', month: 'short' });
   }
-
-  async function repin(pinId: string) {
-    try {
-      await invoke('repin_from_memory', { pinId });
-    } catch (e) {
-      console.error('Error al re-anclar pin:', e);
-    }
+  function retention(pin: PinRecord) {
+    if (pin.is_pinned_forever) return 'Conservado';
+    const minutes = Math.ceil(((pin.expires_at ?? now) - now) / 60);
+    return minutes > 0 ? `Se elimina en ${minutes} min` : 'Pendiente de limpieza';
   }
-
-  async function toggleRetention(pin: PinRecord) {
-    try {
-      const isForever = await invoke<boolean>('toggle_retention', { pinId: pin.id });
-      pin.is_pinned_forever = isForever;
-    } catch (e) {
-      console.error('Error al alternar retención:', e);
-    }
-  }
-
-  async function triggerCapture() {
-    try {
-      await invoke('trigger_capture');
-    } catch (e) {
-      console.error('Error al disparar captura:', e);
-    }
-  }
-
-  function formatTime(timestamp: number): string {
-    const elapsed = Math.floor(Date.now() / 1000 - timestamp);
-    if (elapsed < 60) return `${elapsed}s`;
-    if (elapsed < 3600) return `${Math.floor(elapsed / 60)}m`;
-    if (elapsed < 86400) return `${Math.floor(elapsed / 3600)}h`;
-    return `${Math.floor(elapsed / 86400)}d`;
-  }
-
-  function formatPurgeTime(expiresAt: number | null): string {
-    if (!expiresAt) return '';
-    const remaining = Math.max(0, Math.floor(expiresAt - Date.now() / 1000));
-    const mins = Math.floor(remaining / 60);
-    return mins > 0 ? `Purga en ${mins}m` : 'Purga inminente';
+  function label(pin: PinRecord) {
+    return pin.entity_type === 'BankDigits' ? 'Datos bancarios' : pin.entity_type === 'WifiCredential' ? 'Credencial' : 'Recorte';
   }
 </script>
 
-<main class="memory-strip" aria-label="Cajón de Memoria Screen-Pin">
+<svelte:head><title>Memoria · Screen-Pin</title></svelte:head>
+<svelte:window onfocus={() => { if (desktop) void loadPins(); }} />
+
+<main class="memory-shell">
   <header class="memory-header">
+    <div class="heading-row"><h1>Memoria</h1>
+      <button class="button new-button" disabled={!desktop || !!busy} onclick={() => action('trigger_capture')} aria-label="Nuevo recorte">+ <span>Nuevo recorte</span></button></div>
     <div class="search-box">
-      <svg class="search-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-        <circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="currentColor" stroke-width="1.5" />
-        <line x1="10" y1="10" x2="14" y2="14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
-      </svg>
-      <input
-        type="search"
-        bind:value={searchQuery}
-        oninput={handleSearch}
-        placeholder="Buscar texto, cuenta, clave..."
-        class="search-input"
-        aria-label="Buscar en recortes históricos"
-      />
+      <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="M13 13L17.5 17.5" /></svg>
+      <input type="search" bind:value={searchQuery} oninput={search} placeholder="Buscar recortes…" aria-label="Buscar en el texto de los recortes" />
     </div>
+    <span class="sr-only" role="status">{isLoading ? 'Cargando recortes' : `${pins.length}${pins.length === 50 ? '+' : ''} recorte${pins.length === 1 ? '' : 's'}`}</span>
   </header>
 
-  <section class="pins-feed" aria-live="polite">
-    {#if isLoading}
-      <div class="state-msg">
-        <span class="pulse-indicator"></span>
-        <span>Buscando en recortes locales...</span>
-      </div>
-    {:else if pins.length === 0}
-      <div class="empty-state">
-        <p class="empty-title">No hay recortes guardados</p>
-        <p class="empty-desc">
-          Presiona <kbd>Alt</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd> para fijar una zona de tu pantalla.
-        </p>
-        <button type="button" class="btn primary-btn" onclick={triggerCapture}>
-          Probar recorte ahora
-        </button>
+  <section class="pins-feed" aria-label="Recortes guardados" aria-busy={isLoading}>
+    {#if error}<div class="notice error" role="alert">{error}<button class="retry" onclick={loadPins}>Reintentar</button></div>{/if}
+    {#if !desktop}
+      <div class="empty-state"><div class="empty-icon" aria-hidden="true">⌑</div><h2>Tu memoria vive en el escritorio</h2><p>Abre Screen-Pin para consultar tus capturas locales. Tus recortes no se cargan en esta vista previa.</p><a href="/" class="button">Volver al inicio</a></div>
+    {:else if isLoading && pins.length === 0}
+      <div class="loading-state" role="status">Cargando tus recortes…</div>
+    {:else if !error && pins.length === 0}
+      <div class="empty-state"><h2>{searchQuery.trim() ? 'Sin coincidencias' : 'Aún no hay recortes'}</h2>
+        <p>{searchQuery.trim() ? 'Prueba con otra palabra.' : 'Crea un recorte para verlo aquí.'}</p>
+        {#if searchQuery.trim()}<button class="button" onclick={() => { searchQuery = ''; void loadPins(); }}>Limpiar búsqueda</button>
+        {:else}<button class="button primary" disabled={!!busy} onclick={() => action('trigger_capture')}>Crear mi primer recorte</button>{/if}
       </div>
     {:else}
       <ul class="cards-list">
         {#each pins as pin (pin.id)}
-          <li class="memory-card" class:is-sensitive={pin.is_sensitive}>
-            {#if pin.entity_type === 'BankDigits' || pin.entity_type === 'WifiCredential'}
-              <div class="compact-data-card">
-                <div class="card-main">
-                  <div class="card-meta">
-                    <span class="meta-tag">{pin.entity_type === 'BankDigits' ? 'Cuenta / Tarjeta' : 'Credencial'}</span>
-                    <span class="time-tag">{formatTime(pin.created_at)}</span>
-                    {#if pin.is_sensitive}
-                      <span class="privacy-badge">
-                        {pin.is_pinned_forever ? 'Conservado' : formatPurgeTime(pin.expires_at)}
-                      </span>
-                    {/if}
-                  </div>
-                  <div class="data-value">{pin.raw_text.trim()}</div>
-                  <div class="card-actions">
-                    <button
-                      type="button"
-                      class="card-btn"
-                      onclick={() => copyText(pin.raw_text.trim(), pin.id)}
-                    >
-                      {copyFeedback === pin.id ? '¡Copiado!' : 'Copiar'}
-                    </button>
-                    <button
-                      type="button"
-                      class="card-btn"
-                      onclick={() => repin(pin.id)}
-                    >
-                      Re-anclar
-                    </button>
-                    {#if pin.is_sensitive}
-                      <button
-                        type="button"
-                        class="card-btn retention-btn"
-                        class:active={pin.is_pinned_forever}
-                        onclick={() => toggleRetention(pin)}
-                      >
-                        {pin.is_pinned_forever ? 'Fijado' : 'Fijar'}
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-                <div class="thumbnail-col">
-                  <img
-                    src={`pinasset://localhost/${pin.id}`}
-                    alt="Miniatura"
-                    class="thumb-img"
-                    loading="lazy"
-                  />
-                </div>
-              </div>
-            {:else}
-              <div class="visual-preview-card">
-                <div class="preview-header">
-                  <span class="dim-info">{Math.round(pin.width)} × {Math.round(pin.height)} px</span>
-                  <span class="time-tag">{formatTime(pin.created_at)}</span>
-                </div>
-                <div class="preview-media" onclick={() => repin(pin.id)} role="button" tabindex="0" onkeydown={(e) => e.key === 'Enter' && repin(pin.id)}>
-                  <img
-                    src={`pinasset://localhost/${pin.id}`}
-                    alt="Recorte histórico"
-                    class="preview-img"
-                    loading="lazy"
-                  />
-                </div>
-                {#if pin.raw_text.trim()}
-                  <p class="extracted-snippet">{pin.raw_text.trim()}</p>
-                {/if}
-                <div class="card-actions">
-                  <button
-                    type="button"
-                    class="card-btn"
-                    onclick={() => repin(pin.id)}
-                  >
-                    Re-anclar en ({Math.round(pin.pos_x)}, {Math.round(pin.pos_y)})
-                  </button>
-                  {#if pin.raw_text.trim()}
-                    <button
-                      type="button"
-                      class="card-btn"
-                      onclick={() => copyText(pin.raw_text.trim(), pin.id)}
-                    >
-                      {copyFeedback === pin.id ? '¡Copiado!' : 'Copiar texto'}
-                    </button>
-                  {/if}
-                </div>
-              </div>
-            {/if}
+          <li class="memory-card">
+            <button class="preview" onclick={() => action('repin_from_memory', pin.id)} disabled={!!busy} aria-label="Volver a fijar este recorte">
+              <img src={assetUrl(pin.id)} alt="" loading="lazy" /><span class="preview-label">Fijar ↗</span>
+            </button>
+            <div class="card-content">
+              <div class="card-meta"><span class="type-label">{label(pin)}</span><time datetime={new Date(pin.created_at * 1000).toISOString()} title={new Date(pin.created_at * 1000).toLocaleString('es')}>{age(pin.created_at)}</time></div>
+              {#if pin.raw_text.trim()}<p class="snippet" title={pin.raw_text}>{pin.raw_text.trim()}</p>
+              {:else if pin.ocr_status === 'pending'}<p class="ocr-note">Reconociendo texto…</p>
+              {:else if pin.ocr_status === 'error'}<p class="ocr-note">Lectura de texto no disponible</p>{/if}
+              {#if pin.is_sensitive}<div class="retention"><span aria-hidden="true">◷</span><span>{retention(pin)}</span></div>{/if}
+              {#if pin.raw_text.trim() || pin.is_sensitive}<div class="card-actions">
+                {#if pin.raw_text.trim()}<button class="card-btn" onclick={() => copyText(pin)}>{feedback === pin.id ? 'Copiado ✓' : 'Copiar texto'}</button>{/if}
+                {#if pin.is_sensitive}<button class="card-btn retain" aria-pressed={pin.is_pinned_forever} disabled={!!busy} onclick={() => action('toggle_retention', pin.id)} title={pin.is_pinned_forever ? 'Volver a eliminar automáticamente en 30 minutos' : 'Conservar sin caducidad'}>{pin.is_pinned_forever ? 'Liberar' : 'Conservar'}</button>{/if}
+              </div>{/if}
+            </div>
           </li>
         {/each}
       </ul>
     {/if}
   </section>
+  <span class="sr-only" role="status">{feedback ? 'Texto copiado al portapapeles' : ''}</span>
 </main>
 
 <style>
-  .memory-strip {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    background-color: #141413;
-    color: #F4F3EF;
-    box-sizing: border-box;
-    user-select: none;
-    overflow: hidden;
-  }
-
-  .memory-header {
-    padding: 10px 12px;
-    border-bottom: 1px solid #262624;
-    background: #141413;
-  }
-
-  .search-box {
-    display: flex;
-    align-items: center;
-    background: #262624;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 4px 8px;
-    gap: 8px;
-  }
-
-  .search-box:focus-within {
-    border-color: #FF8A50;
-    outline: 1px solid #FF8A50;
-  }
-
-  .search-icon {
-    color: #A3A19A;
-    flex-shrink: 0;
-  }
-
-  .search-input {
-    background: transparent;
-    border: none;
-    color: #F4F3EF;
-    font-family: inherit;
-    font-size: 12px;
-    width: 100%;
-    outline: none;
-  }
-
-  .search-input::placeholder {
-    color: #A3A19A;
-  }
-
-  .pins-feed {
-    flex: 1;
-    overflow-y: auto;
-    padding: 10px 12px;
-  }
-
-  .pins-feed::-webkit-scrollbar {
-    width: 4px;
-  }
-  .pins-feed::-webkit-scrollbar-thumb {
-    background: #262624;
-    border-radius: 2px;
-  }
-
-  .state-msg {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 24px 0;
-    justify-content: center;
-    font-size: 12px;
-    color: #A3A19A;
-  }
-
-  .pulse-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #D95D1E;
-    animation: pulse 1s infinite alternate;
-  }
-
-  @keyframes pulse {
-    from { opacity: 0.3; }
-    to { opacity: 1; }
-  }
-
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 40px 16px;
-    text-align: center;
-    gap: 12px;
-  }
-
-  .empty-title {
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .empty-desc {
-    font-size: 12px;
-    color: #A3A19A;
-    line-height: 1.5;
-  }
-
-  kbd {
-    background: #262624;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 2px 5px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 11px;
-    color: #FF8A50;
-  }
-
-  .btn.primary-btn {
-    background: #262624;
-    color: #F4F3EF;
-    border: 1px solid #D95D1E;
-    border-radius: 2px;
-    padding: 6px 14px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 12px;
-    cursor: pointer;
-  }
-
-  .btn.primary-btn:hover {
-    border-color: #FF8A50;
-  }
-
-  .cards-list {
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .memory-card {
-    background: #262624;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 8px 10px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .memory-card.is-sensitive {
-    border-left: 3px solid #D95D1E;
-  }
-
-  .compact-data-card {
-    display: flex;
-    justify-content: space-between;
-    gap: 10px;
-  }
-
-  .card-main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .card-meta {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 10px;
-  }
-
-  .meta-tag {
-    color: #D95D1E;
-    font-weight: 600;
-  }
-
-  .time-tag {
-    color: #A3A19A;
-  }
-
-  .privacy-badge {
-    background: #141413;
-    border: 1px solid #4A4945;
-    color: #FF8A50;
-    padding: 1px 4px;
-    border-radius: 2px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .data-value {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    color: #F4F3EF;
-    word-break: break-all;
-  }
-
-  .thumbnail-col {
-    width: 52px;
-    height: 52px;
-    flex-shrink: 0;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    overflow: hidden;
-    background: #141413;
-  }
-
-  .thumb-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-
-  .visual-preview-card {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .preview-header {
-    display: flex;
-    justify-content: space-between;
-    font-size: 10px;
-    color: #A3A19A;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .preview-media {
-    max-height: 120px;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    overflow: hidden;
-    cursor: pointer;
-    background: #141413;
-  }
-
-  .preview-img {
-    width: 100%;
-    height: auto;
-    max-height: 120px;
-    object-fit: contain;
-    display: block;
-  }
-
-  .extracted-snippet {
-    font-size: 11px;
-    color: #A3A19A;
-    line-height: 1.3;
-    max-height: 32px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .card-actions {
-    display: flex;
-    gap: 6px;
-    margin-top: 2px;
-  }
-
-  .card-btn {
-    background: #141413;
-    color: #F4F3EF;
-    border: 1px solid #4A4945;
-    border-radius: 2px;
-    padding: 3px 8px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px;
-    cursor: pointer;
-  }
-
-  .card-btn:hover {
-    border-color: #FF8A50;
-  }
-
-  .card-btn.retention-btn.active {
-    background: #D95D1E;
-    border-color: #D95D1E;
-    color: #F4F3EF;
-  }
+  .memory-shell { display: flex; flex-direction: column; height: 100dvh; background: var(--chassis-dark); color: var(--chassis-light); }
+  .memory-header { padding: 16px 16px 0; }
+  .heading-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h1 { font-weight: 600; letter-spacing: -.6px; font-size: 22px; }
+  .new-button { font-size: 15px; padding: 5px 10px; } .new-button span { font-size: 11px; }
+  .search-box { display: flex; align-items: center; gap: 8px; margin: 12px 0 0; padding: 8px 10px; background: #1e1e1c; border: 1px solid var(--border-strong); border-radius: 3px; color: var(--text-secondary); }
+  .search-box:focus-within { outline: 2px solid var(--accent-focus); outline-offset: 2px; }
+  .search-box input { border: 0; background: transparent; color: var(--chassis-light); font-size: 12px; width: 100%; min-width: 0; outline: none; }
+  input::placeholder { color: var(--text-secondary); }
+  .search-box svg { flex-shrink: 0; }
+  .pins-feed { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  .cards-list { list-style: none; display: grid; gap: 8px; }
+  .memory-card { min-width: 0; display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 10px; background: #1c1c1a; border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; }
+  .card-content { min-width: 0; }
+  .card-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; color: var(--text-secondary); }
+  .type-label { color: var(--chassis-light); }
+  .preview { position: relative; display: block; width: 84px; height: 84px; overflow: hidden; background: var(--surface-secondary); border: 1px solid var(--border-color); border-radius: 2px; cursor: pointer; }
+  .preview img { display: block; height: 100%; width: 100%; object-fit: contain; }
+  .preview-label { position: absolute; bottom: 0; left: 0; right: 0; font-size: 10px; padding: 4px; color: var(--chassis-light); background: rgba(20, 20, 19, .9); }
+  .snippet { margin: 6px 0 0; font: 11px/1.4 var(--font-mono); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; white-space: pre-line; user-select: text; }
+  .ocr-note { font-size: 11px; color: var(--text-secondary); margin-top: 6px; }
+  .retention { display: flex; gap: 6px; align-items: center; color: var(--accent-focus); font-size: 10px; margin-top: 6px; }
+  .card-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .card-btn { background: none; border: 1px solid transparent; color: var(--text-secondary); font-size: 11px; padding: 4px 6px; cursor: pointer; border-radius: 2px; }
+  .card-btn:hover { background: var(--surface-secondary); color: var(--chassis-light); } .retain { color: var(--accent-focus); }
+  .empty-state { min-height: 180px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 10px; padding: 16px 8px; max-width: 360px; margin: auto; }
+  .empty-icon { font-size: 42px; color: var(--accent-focus); line-height: 1; } .empty-state h2 { font-size: 17px; font-weight: 500; } .empty-state p { font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
+  .empty-state a { text-decoration: none; } .loading-state { padding: 48px 0; text-align: center; color: var(--text-secondary); font-size: 12px; }
+  .retry { display: block; margin-top: 6px; background: transparent; border: 0; color: var(--accent-focus); font-size: 12px; text-decoration: underline; cursor: pointer; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  @media (max-width: 360px) { .new-button span { display: none; } }
 </style>
