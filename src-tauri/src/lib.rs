@@ -1,6 +1,7 @@
 pub mod capture;
 pub mod memory_db;
 pub mod ocr;
+pub mod paste_target;
 
 use capture::{CaptureState, CropSelection, MonitorInfo};
 use memory_db::{MemoryDatabase, PinRecord};
@@ -311,6 +312,34 @@ fn copy_pin_image(
 }
 
 #[tauri::command]
+fn get_target_window_under_pin(
+    app: AppHandle,
+    pin_id: String,
+) -> Result<Option<paste_target::TargetWindowInfo>, String> {
+    let pin_label = format!("pin-{pin_id}");
+    if let Some(win) = app.get_webview_window(&pin_label) {
+        if let (Ok(pos), Ok(size)) = (win.outer_position(), win.outer_size()) {
+            let cx = pos.x + (size.width as i32) / 2;
+            let cy = pos.y + (size.height as i32) / 2;
+            return Ok(paste_target::find_target_window_at_point(cx, cy));
+        }
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+async fn paste_pin_to_target(
+    state: State<'_, Arc<CaptureState>>,
+    db: State<'_, Arc<MemoryDatabase>>,
+    pin_id: String,
+    target_hwnd: usize,
+) -> Result<(), String> {
+    copy_pin_image(state, db, pin_id)?;
+    paste_target::send_paste_to_target_hwnd(target_hwnd).await?;
+    Ok(())
+}
+
+#[tauri::command]
 async fn open_memory_drawer(app: AppHandle) -> Result<(), String> {
     show_memory_drawer(&app)
 }
@@ -404,10 +433,19 @@ pub fn spawn_pin_window(
     let closed_app = app.clone();
     let closed_id = pin_id.to_owned();
     let follow_pin = win.clone();
+    let event_app = app.clone();
+    let event_pin_id = pin_id.to_owned();
     win.on_window_event(move |event| {
         match event {
             tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) => {
                 let _ = position_pin_toolbar(&follow_pin, &toolbar);
+                if let (Ok(pos), Ok(size)) = (follow_pin.outer_position(), follow_pin.outer_size()) {
+                    let cx = pos.x + (size.width as i32) / 2;
+                    let cy = pos.y + (size.height as i32) / 2;
+                    let target = paste_target::find_target_window_at_point(cx, cy);
+                    let _ = event_app.emit_to(format!("pin-{event_pin_id}"), "pin:target-window", &target);
+                    let _ = event_app.emit_to(format!("pin-toolbar-{event_pin_id}"), "pin:target-window", &target);
+                }
             }
             tauri::WindowEvent::Destroyed => {
                 let _ = toolbar.close();
@@ -449,7 +487,7 @@ fn show_pin_toolbar(
         let url = format!("/?view=pin-toolbar&pin_id={pin_id}");
         let win = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
             .title("Acciones del recorte")
-            .inner_size(440.0, 68.0)
+            .inner_size(530.0, 68.0)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)
@@ -851,7 +889,9 @@ pub fn run() {
             repin_from_memory,
             open_memory_drawer,
             copy_pin_image,
-            get_pin_image_path
+            get_pin_image_path,
+            get_target_window_under_pin,
+            paste_pin_to_target
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

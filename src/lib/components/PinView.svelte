@@ -3,9 +3,8 @@
   import { invoke } from '@tauri-apps/api/core';
   import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
-  import type { OcrLine, OcrPayload, PinRecord, SmartEntity } from '$lib/types';
+  import type { OcrLine, OcrPayload, PinRecord, SmartEntity, TargetWindowInfo } from '$lib/types';
   import { playClickSound } from '$lib/sound';
-  import { startDrag } from '@crabnebula/tauri-plugin-drag';
 
   let { pinId, toolbar = false }: { pinId: string; toolbar?: boolean } = $props();
   let lines = $state<OcrLine[]>([]);
@@ -23,10 +22,9 @@
   let imageFeedbackTimer: ReturnType<typeof setTimeout>;
   const bankEntity = $derived(entities.find(e => e.kind === 'BankDigits'));
 
-  // Ruta física del archivo para arrastre nativo hacia otras aplicaciones
-  let pinFilePath = $state('');
-  let pointerDownPos = $state<{ x: number; y: number } | null>(null);
-  let isDraggingStarted = $state(false);
+  // Estado para detección y pegado inteligente en aplicaciones externas
+  let targetWindow = $state<TargetWindowInfo | null>(null);
+  let isPasting = $state(false);
 
   // Estados para visibilidad animada de la barra de opciones
   let isNear = $state(false);
@@ -86,6 +84,12 @@
           [`ocr:ready:${pinId}`, (event: { payload: OcrPayload }) => applyPayload(event.payload)],
           [`ocr:error:${pinId}`, () => { ocrStatus = 'error'; }],
           ['ghost:changed', (event: { payload: boolean }) => { isGhostMode = event.payload; }],
+          ['pin:target-window', (event: { payload: TargetWindowInfo | null }) => { targetWindow = event.payload; }],
+          ['pin:trigger-paste-anim', (event: { payload: TargetWindowInfo | null }) => {
+            if (event.payload) targetWindow = event.payload;
+            isPasting = true;
+            playClickSound();
+          }],
         ] as const) {
           const unlisten = await listen(name, handler as (event: { payload: unknown }) => void, { target: `${toolbar ? 'pin-toolbar' : 'pin'}-${pinId}` });
           if (disposed) { unlisten(); return; }
@@ -101,12 +105,12 @@
 
           // Inicialmente la barra está oculta y no intercepta clics
           void invoke('set_toolbar_interactive', { pinId, interactive: false });
-        } else {
-          // Obtener ruta local en disco para arrastre nativo a otras apps
-          invoke<string>('get_pin_image_path', { pinId })
-            .then(p => { if (!disposed) pinFilePath = p; })
-            .catch(() => {});
         }
+
+        // Consultar ventana destino inicial si existe bajo el recorte
+        invoke<TargetWindowInfo | null>('get_target_window_under_pin', { pinId })
+          .then(tw => { if (!disposed && tw) targetWindow = tw; })
+          .catch(() => {});
 
         const snapshot = await invoke<{ pin: PinRecord; entities: SmartEntity[] }>('get_pin', { pinId });
         if (disposed || ocrStatus !== 'loading') return;
@@ -226,51 +230,30 @@
     }
   }
 
-  function handleImagePointerDown(e: PointerEvent) {
-    if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('.ocr-word, button') || window.getSelection()?.toString()) return;
-    pointerDownPos = { x: e.clientX, y: e.clientY };
-    isDraggingStarted = false;
-  }
+  async function pasteToTarget() {
+    if (busy || isPasting) return;
+    if (!targetWindow || !targetWindow.is_valid) return;
+    isPasting = true;
+    error = '';
+    playClickSound();
 
-  async function handleImagePointerMove(e: PointerEvent) {
-    if (!pointerDownPos || isDraggingStarted) return;
-    const dx = e.clientX - pointerDownPos.x;
-    const dy = e.clientY - pointerDownPos.y;
-    if (Math.hypot(dx, dy) >= 6) {
-      isDraggingStarted = true;
-      pointerDownPos = null;
-      await initiateDrag();
+    if (toolbar && isTauri()) {
+      void emitTo(`pin-${pinId}`, 'pin:trigger-paste-anim', targetWindow);
     }
-  }
-
-  function handleImagePointerUp() {
-    pointerDownPos = null;
-    isDraggingStarted = false;
-  }
-
-  async function initiateDrag() {
-    if (!isTauri()) return;
-    if (!pinFilePath) {
-      try {
-        pinFilePath = await invoke<string>('get_pin_image_path', { pinId });
-      } catch (err) {
-        console.warn('No se encontró archivo de imagen para arrastrar:', err);
-        return;
-      }
-    }
-    if (!pinFilePath) return;
 
     try {
-      await startDrag({
-        item: [pinFilePath],
-        icon: pinFilePath,
-        mode: 'copy'
-      });
-    } catch (err) {
-      console.warn('Error al iniciar arrastre nativo de imagen:', err);
-    } finally {
-      isDraggingStarted = false;
+      if (isTauri()) {
+        await invoke('paste_pin_to_target', {
+          pinId,
+          targetHwnd: targetWindow.hwnd
+        });
+      }
+      setTimeout(() => {
+        void archivePin();
+      }, 340);
+    } catch (cause) {
+      isPasting = false;
+      error = errorMessage(cause);
     }
   }
 
@@ -280,6 +263,10 @@
     else if ((event.target as HTMLElement).closest('button, input, textarea')) return;
     else if (event.altKey && event.key.toLowerCase() === 'g') { event.preventDefault(); void toggleGhostMode(); }
     else if (event.key === 'Enter' && bankEntity?.kind === 'BankDigits') { event.preventDefault(); void copyQuickValue(bankEntity.value.clean_digits, 'Número'); }
+    else if ((event.ctrlKey && event.key.toLowerCase() === 'v') || (event.key === 'Enter' && targetWindow?.is_valid)) {
+      event.preventDefault();
+      void pasteToTarget();
+    }
   }
 </script>
 
@@ -313,6 +300,21 @@
         <span>Copiar imagen</span>
       {/if}
     </button>
+    {#if targetWindow && targetWindow.is_valid}
+      <button
+        class="toolbar-btn paste-btn"
+        title="Pegar automáticamente en {targetWindow.app_name} (Ctrl+V)"
+        onclick={pasteToTarget}
+        disabled={isPasting}
+      >
+        {#if isPasting}
+          <span>Pegando…</span>
+        {:else}
+          <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><rect x="8" y="2" width="8" height="4" rx="1" ry="1"/></svg>
+          <span>Pegar en {targetWindow.app_name}</span>
+        {/if}
+      </button>
+    {/if}
     <button
       class="toolbar-btn"
       disabled={!fullText.trim()}
@@ -351,6 +353,7 @@
 <main
   class="pin-chassis"
   class:is-ghost={isGhostMode}
+  class:is-pasting={isPasting}
   ondblclick={handleBackgroundDoubleClick}
   onmouseenter={handlePinMouseEnter}
   onmouseleave={handlePinMouseLeave}
@@ -371,13 +374,10 @@
 
   <div
     class="image-stage"
+    data-tauri-drag-region
     role="region"
-    aria-label="Captura fijada en pantalla. Arrastra la imagen para pegarla en cualquier lugar."
-    title="Arrastrar imagen para pegar en otra aplicación / ventana"
-    onpointerdown={handleImagePointerDown}
-    onpointermove={handleImagePointerMove}
-    onpointerup={handleImagePointerUp}
-    onpointercancel={handleImagePointerUp}
+    aria-label="Captura fijada en pantalla"
+    title="Arrastra para mover la ventana sobre otra aplicación para pegarla"
   >
     <img
       src={isTauri() ? assetUrl(pinId) : undefined}
@@ -405,6 +405,33 @@
       </div>
     {/if}
   </div>
+
+  {#if targetWindow && targetWindow.is_valid && !isPasting}
+    <div class="pin-paste-bar">
+      <button
+        type="button"
+        class="pin-paste-pill"
+        onclick={pasteToTarget}
+        title="Pegar recorte directamente en {targetWindow.app_name} (Ctrl+V)"
+      >
+        <svg class="pill-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+          <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+        </svg>
+        <span>Pegar en <strong>{targetWindow.app_name}</strong></span>
+      </button>
+    </div>
+  {/if}
+
+  {#if isPasting}
+    <div class="pasting-overlay" role="status">
+      <svg class="pasting-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      <span>¡Pegado en {targetWindow?.app_name || 'destino'}!</span>
+    </div>
+  {/if}
+
   {#if error}<span class="pin-error" role="alert">{error}</span>{/if}
   {#if copyFeedback}<span class="sr-only" role="status">{copyFeedback}</span>{/if}
 </main>
@@ -442,6 +469,31 @@
     opacity: 0.22;
   }
 
+  .pin-chassis.is-pasting {
+    pointer-events: none;
+    animation: paste-woosh 340ms cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
+  }
+
+  @keyframes paste-woosh {
+    0% {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+      box-shadow: 0 0 0 2px var(--accent-focus, #FF8A50), 0 0 20px rgba(255, 138, 80, 0.6);
+      filter: brightness(1);
+    }
+    35% {
+      transform: scale(1.04) translateY(-4px);
+      box-shadow: 0 0 0 4px #FF8A50, 0 8px 30px rgba(255, 138, 80, 0.85);
+      filter: brightness(1.25);
+    }
+    100% {
+      transform: scale(0.35) translateY(45px);
+      opacity: 0;
+      box-shadow: 0 0 0 1px #FF8A50, 0 0 8px rgba(255, 138, 80, 0.2);
+      filter: brightness(1.4);
+    }
+  }
+
   .calibration-corner {
     position: absolute;
     top: 0;
@@ -477,7 +529,7 @@
     position: relative;
     width: 100%;
     height: 100%;
-    cursor: grab;
+    cursor: move;
   }
 
   .image-stage:active {
@@ -540,7 +592,7 @@
     align-items: center;
     gap: 4px;
     width: 100%;
-    max-width: 412px;
+    max-width: 520px;
     height: 38px;
     padding: 3px 4px;
     box-sizing: border-box;
@@ -611,6 +663,95 @@
   .toolbar-btn.active {
     background: var(--accent-focus);
     color: var(--chassis-dark);
+  }
+
+  .toolbar-btn.paste-btn {
+    border: 1px solid rgba(255, 138, 80, 0.45);
+    color: #FFB380;
+    background: rgba(255, 138, 80, 0.12);
+  }
+
+  .toolbar-btn.paste-btn:hover:not(:disabled) {
+    background: var(--accent-focus, #FF8A50);
+    color: #141413;
+    border-color: var(--accent-focus, #FF8A50);
+  }
+
+  .pin-paste-bar {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 35;
+    pointer-events: auto;
+    animation: pill-appear 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  @keyframes pill-appear {
+    from {
+      opacity: 0;
+      transform: translateX(-50%) translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+  }
+
+  .pin-paste-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    background: rgba(20, 20, 19, 0.92);
+    border: 1px solid var(--accent-focus, #FF8A50);
+    border-radius: 20px;
+    color: #F4F3EF;
+    font-size: 11px;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), 0 0 10px rgba(255, 138, 80, 0.3);
+    transition: all 120ms ease;
+    white-space: nowrap;
+    user-select: none;
+  }
+
+  .pin-paste-pill:hover {
+    background: var(--accent-focus, #FF8A50);
+    color: #141413;
+    box-shadow: 0 4px 16px rgba(255, 138, 80, 0.5);
+    transform: translateY(-1px) scale(1.02);
+  }
+
+  .pin-paste-pill:hover .pill-icon {
+    stroke: #141413;
+  }
+
+  .pin-paste-pill strong {
+    color: var(--accent-focus, #FF8A50);
+    font-weight: 600;
+  }
+
+  .pin-paste-pill:hover strong {
+    color: #141413;
+  }
+
+  .pasting-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(20, 20, 19, 0.82);
+    backdrop-filter: blur(4px);
+    color: #F4F3EF;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 50;
+    border-radius: 2px;
   }
 
   .sr-only {
