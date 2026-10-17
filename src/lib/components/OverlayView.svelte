@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import type { MonitorInfo, CropSelection } from '$lib/types';
   import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
+  import { playClickSound } from '$lib/sound';
 
   let { monitorId = 0 }: { monitorId?: number } = $props();
 
@@ -173,6 +174,7 @@
     const physH = Math.max(1, Math.floor(selH * scaleFactor));
 
     try {
+      playClickSound();
       const selection: CropSelection = { monitor_id: monitorId, physical_x: physX, physical_y: physY, physical_w: physW, physical_h: physH };
       await invoke('confirm_crop', { selection });
     } catch (err) {
@@ -183,6 +185,7 @@
   }
 
   async function cancel() {
+    playClickSound();
     try {
       await invoke('cancel_capture');
     } catch (err) {

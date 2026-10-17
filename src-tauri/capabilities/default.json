@@ -5,6 +5,7 @@
   "windows": ["main", "memory-drawer", "pin-*", "pin-toolbar-*", "overlay-*"],
   "permissions": [
     "core:default",
-    "core:window:allow-start-dragging"
+    "core:window:allow-start-dragging",
+    "autostart:default"
   ]
 }

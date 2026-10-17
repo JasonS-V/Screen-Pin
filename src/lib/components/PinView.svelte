@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
   import type { OcrLine, OcrPayload, PinRecord, SmartEntity } from '$lib/types';
 
@@ -18,6 +18,39 @@
   let feedbackTimer: ReturnType<typeof setTimeout>;
   const bankEntity = $derived(entities.find(e => e.kind === 'BankDigits'));
 
+  // Estados para visibilidad animada de la barra de opciones
+  let isNear = $state(false);
+  let isHovered = $state(false);
+  let isVisible = $state(false);
+  let hideTimer: ReturnType<typeof setTimeout>;
+  let interactiveTimer: ReturnType<typeof setTimeout>;
+
+  function updateVisibility(show: boolean) {
+    clearTimeout(hideTimer);
+    clearTimeout(interactiveTimer);
+    if (show) {
+      isVisible = true;
+      if (isTauri()) {
+        void invoke('set_toolbar_interactive', { pinId, interactive: true });
+      }
+    } else {
+      hideTimer = setTimeout(() => {
+        isVisible = false;
+        interactiveTimer = setTimeout(() => {
+          if (!isVisible && isTauri()) {
+            void invoke('set_toolbar_interactive', { pinId, interactive: false });
+          }
+        }, 260);
+      }, 280);
+    }
+  }
+
+  $effect(() => {
+    if (!toolbar) return;
+    const shouldBeVisible = isNear || isHovered;
+    updateVisibility(shouldBeVisible);
+  });
+
   function applyPayload(payload: OcrPayload) {
     lines = payload.lines;
     entities = payload.entities;
@@ -26,7 +59,15 @@
   }
 
   onMount(() => {
-    if (!isTauri()) { ocrStatus = 'error'; error = 'Abre este recorte en Screen-Pin para ver su imagen y texto.'; return; }
+    if (!isTauri()) {
+      if (!toolbar) {
+        ocrStatus = 'error';
+        error = 'Abre este recorte en Screen-Pin para ver su imagen y texto.';
+      } else {
+        isVisible = true;
+      }
+      return;
+    }
     let disposed = false;
     const listeners: UnlistenFn[] = [];
     async function initialize() {
@@ -40,6 +81,18 @@
           if (disposed) { unlisten(); return; }
           listeners.push(unlisten);
         }
+
+        if (toolbar) {
+          const unlistenProximity = await listen<boolean>('toolbar:proximity', (event) => {
+            isNear = event.payload;
+          });
+          if (disposed) { unlistenProximity(); return; }
+          listeners.push(unlistenProximity);
+
+          // Inicialmente la barra está oculta y no intercepta clics
+          void invoke('set_toolbar_interactive', { pinId, interactive: false });
+        }
+
         const snapshot = await invoke<{ pin: PinRecord; entities: SmartEntity[] }>('get_pin', { pinId });
         if (disposed || ocrStatus !== 'loading') return;
         const pin = snapshot.pin;
@@ -49,7 +102,13 @@
       } catch (cause) { if (!disposed) { ocrStatus = 'error'; error = errorMessage(cause); } }
     }
     void initialize();
-    return () => { disposed = true; listeners.forEach(fn => fn()); clearTimeout(feedbackTimer); };
+    return () => {
+      disposed = true;
+      listeners.forEach(fn => fn());
+      clearTimeout(feedbackTimer);
+      clearTimeout(hideTimer);
+      clearTimeout(interactiveTimer);
+    };
   });
 
   async function archivePin() {
@@ -88,6 +147,18 @@
     } catch (cause) { error = errorMessage(cause); }
   }
 
+  function handlePinMouseEnter() {
+    if (isTauri()) {
+      void emitTo(`pin-toolbar-${pinId}`, 'toolbar:proximity', true);
+    }
+  }
+
+  function handlePinMouseLeave() {
+    if (isTauri()) {
+      void emitTo(`pin-toolbar-${pinId}`, 'toolbar:proximity', false);
+    }
+  }
+
   function handleKeydown(event: KeyboardEvent) {
     if (event.repeat) return;
     if (event.key === 'Escape') { event.preventDefault(); void archivePin(); }
@@ -101,19 +172,54 @@
 <svelte:window onkeydown={handleKeydown} oncopy={handleCopy} bind:innerHeight={viewHeight} />
 
 {#if toolbar}
-<main class="pin-toolbar" class:has-error={!!error} title={error || undefined} aria-label="Acciones del recorte">
-  <button class="toolbar-btn" disabled={!fullText.trim()} title={ocrStatus === 'loading' ? 'Reconociendo texto…' : ocrStatus === 'error' ? 'Lectura no disponible' : ocrStatus === 'empty' ? 'No se detectó texto' : 'Copiar todo el texto'} onclick={() => copyQuickValue(fullText, 'Texto')}>
-    {copyFeedback ? 'Copiado ✓' : 'Copiar texto'}
-  </button>
-  <button class="toolbar-btn" class:active={isGhostMode} onclick={toggleGhostMode} title="Dejar pasar los clics. Recuperar con Alt+Shift+G o desde la bandeja." aria-pressed={isGhostMode}>Fantasma</button>
-  <button class="toolbar-btn" onclick={archivePin} disabled={busy} title="Guardar en Memoria y cerrar">Archivar</button>
-  {#if error}<span class="sr-only" role="alert">{error}</span>{/if}
-</main>
+<div
+  class="pin-toolbar-viewport"
+  role="presentation"
+  onmouseenter={() => { isHovered = true; }}
+  onmouseleave={() => { isHovered = false; }}
+>
+  <main
+    class="pin-toolbar"
+    class:is-visible={isVisible}
+    class:has-error={!!error}
+    title={error || undefined}
+    aria-label="Acciones del recorte"
+  >
+    <button
+      class="toolbar-btn"
+      disabled={!fullText.trim()}
+      title={ocrStatus === 'loading' ? 'Reconociendo texto…' : ocrStatus === 'error' ? 'Lectura no disponible' : ocrStatus === 'empty' ? 'No se detectó texto' : 'Copiar todo el texto'}
+      onclick={() => copyQuickValue(fullText, 'Texto')}
+    >
+      {copyFeedback ? 'Copiado ✓' : 'Copiar texto'}
+    </button>
+    <button
+      class="toolbar-btn"
+      class:active={isGhostMode}
+      onclick={toggleGhostMode}
+      title="Dejar pasar los clics. Recuperar con Alt+Shift+G o desde la bandeja."
+      aria-pressed={isGhostMode}
+    >
+      Fantasma
+    </button>
+    <button
+      class="toolbar-btn"
+      onclick={archivePin}
+      disabled={busy}
+      title="Guardar en Memoria y cerrar"
+    >
+      Archivar
+    </button>
+    {#if error}<span class="sr-only" role="alert">{error}</span>{/if}
+  </main>
+</div>
 {:else}
 <main
   class="pin-chassis"
   class:is-ghost={isGhostMode}
   ondblclick={handleBackgroundDoubleClick}
+  onmouseenter={handlePinMouseEnter}
+  onmouseleave={handlePinMouseLeave}
   aria-label="Recorte de pantalla flotante"
 >
   <div
@@ -257,10 +363,90 @@
   }
 
   .pin-error { position: absolute; bottom: 4px; left: 4px; right: 4px; z-index: 25; padding: 5px 7px; color: var(--accent-focus); background: var(--chassis-dark); font-size: 11px; overflow-wrap: anywhere; }
-  .pin-toolbar { display: flex; align-items: center; gap: 4px; width: 100vw; height: 100vh; padding: 4px; overflow: hidden; color: var(--chassis-light); background: var(--chassis-dark); border: 1px solid var(--border-strong); border-radius: 6px; box-shadow: 0 4px 12px rgba(0, 0, 0, .28); }
-  .pin-toolbar.has-error { border-color: var(--accent-focus); }
-  .toolbar-btn { flex: 1; min-width: 0; height: 32px; border: 0; border-radius: 3px; background: var(--surface-secondary); color: var(--chassis-light); font-size: 11px; font-weight: 600; white-space: nowrap; cursor: pointer; }
-  .toolbar-btn:hover:not(:disabled) { background: #393936; }
-  .toolbar-btn.active { background: var(--accent-focus); color: var(--chassis-dark); }
-  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+
+  .pin-toolbar-viewport {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 2px 4px 10px 4px;
+    box-sizing: border-box;
+    overflow: hidden;
+    background: transparent;
+  }
+
+  .pin-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    max-width: 322px;
+    height: 38px;
+    padding: 3px 4px;
+    box-sizing: border-box;
+    overflow: hidden;
+    color: var(--chassis-light);
+    background: var(--chassis-dark);
+    border: 1px solid var(--border-strong, #30302d);
+    border-radius: 6px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+
+    /* Oculto por defecto y desplazado hacia arriba */
+    opacity: 0;
+    transform: translateY(-24px);
+    pointer-events: none;
+
+    /* Animación de retorno */
+    transition:
+      transform 220ms cubic-bezier(0.4, 0, 0.2, 1),
+      opacity 180ms ease-out;
+    will-change: transform, opacity;
+  }
+
+  .pin-toolbar.is-visible {
+    /* Desplazamiento fluido hacia abajo al aparecer */
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+    transition:
+      transform 280ms cubic-bezier(0.16, 1, 0.3, 1),
+      opacity 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .pin-toolbar.has-error {
+    border-color: var(--accent-focus);
+  }
+
+  .toolbar-btn {
+    flex: 1;
+    min-width: 0;
+    height: 30px;
+    border: 0;
+    border-radius: 3px;
+    background: var(--surface-secondary, #262624);
+    color: var(--chassis-light);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background 120ms ease;
+  }
+
+  .toolbar-btn:hover:not(:disabled) {
+    background: #393936;
+  }
+
+  .toolbar-btn.active {
+    background: var(--accent-focus);
+    color: var(--chassis-dark);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
 </style>

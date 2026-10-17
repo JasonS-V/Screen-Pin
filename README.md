@@ -17,7 +17,7 @@ pnpm tauri dev
 
 - **Alt + Shift + S**: congela los monitores. Arrastra una zona para fijarla; **Esc** o clic derecho cancela.
 - **Flechas**: mueve el cursor de selección en pasos de 10 píxeles lógicos; **Shift + flechas**, de uno en uno. **Espacio** fija el ancla y **Enter** confirma.
-- El recorte permanece encima de otras ventanas. Arrastra desde la esquina ámbar o una zona sin texto. El texto reconocido se puede seleccionar y copiar; una barra flotante junto al recorte muestra **Copiar texto**, **Fantasma** y **Archivar**.
+- El recorte permanece encima de otras ventanas. Arrastra desde la esquina ámbar o una zona sin texto. El texto reconocido se puede seleccionar y copiar; al acercar el cursor a la ventana del recorte, aparece con un desplazamiento fluido hacia abajo la barra con **Copiar texto**, **Fantasma** y **Archivar**.
 - **Archivar**, **Esc** o doble clic sobre una zona sin texto guarda el recorte en memoria y cierra su ventana.
 - **Alt + Shift + M**: abre Memoria. Busca por el texto reconocido, copia el contenido o vuelve a fijar una captura. Volver a fijar un recorte ya abierto enfoca su ventana.
 - **Fantasma** permite que los clics atraviesen el recorte. **Alt + Shift + G**, abrir Memoria o el menú de la bandeja recupera la interacción.

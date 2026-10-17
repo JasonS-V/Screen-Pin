@@ -378,6 +378,20 @@ pub fn spawn_pin_window(
     Ok(())
 }
 
+#[tauri::command]
+async fn set_toolbar_interactive(
+    app: AppHandle,
+    pin_id: String,
+    interactive: bool,
+) -> Result<(), String> {
+    let label = format!("pin-toolbar-{pin_id}");
+    if let Some(win) = app.get_webview_window(&label) {
+        win.set_ignore_cursor_events(!interactive)
+            .map_err(|e| format!("Fallo al configurar interactividad de barra: {e}"))?;
+    }
+    Ok(())
+}
+
 fn show_pin_toolbar(
     app: &AppHandle,
     pin: &tauri::WebviewWindow,
@@ -388,18 +402,20 @@ fn show_pin_toolbar(
         existing
     } else {
         let url = format!("/?view=pin-toolbar&pin_id={pin_id}");
-        tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
+        let win = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
             .title("Acciones del recorte")
-            .inner_size(330.0, 44.0)
+            .inner_size(330.0, 52.0)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)
             .transparent(true)
             .resizable(false)
-            .shadow(true)
+            .shadow(false)
             .visible(false)
             .build()
-            .map_err(|e| format!("Fallo al abrir las acciones del recorte: {e}"))?
+            .map_err(|e| format!("Fallo al abrir las acciones del recorte: {e}"))?;
+        let _ = win.set_ignore_cursor_events(true);
+        win
     };
     position_pin_toolbar(pin, &toolbar)?;
     toolbar.show().map_err(|e| e.to_string())?;
@@ -414,7 +430,7 @@ fn position_pin_toolbar(
     let pin_size = pin.outer_size().map_err(|e| e.to_string())?;
     let size = toolbar.outer_size().map_err(|e| e.to_string())?;
     let mut x = position.x + (pin_size.width as i32 - size.width as i32) / 2;
-    let below = position.y + pin_size.height as i32 + 8;
+    let below = position.y + pin_size.height as i32 + 2;
     let mut y = below;
     if let Some(monitor) = pin.current_monitor().map_err(|e| e.to_string())? {
         let left = monitor.position().x;
@@ -423,12 +439,121 @@ fn position_pin_toolbar(
         let bottom = top + monitor.size().height as i32;
         x = x.clamp(left, (right - size.width as i32).max(left));
         if below + size.height as i32 > bottom {
-            y = (position.y - size.height as i32 - 8).max(top);
+            y = (position.y - size.height as i32 - 4).max(top);
         }
     }
     toolbar
         .set_position(tauri::PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "windows")]
+fn get_global_cursor_pos() -> Option<(i32, i32)> {
+    #[repr(C)]
+    struct Point {
+        x: i32,
+        y: i32,
+    }
+    unsafe extern "system" {
+        fn GetCursorPos(lpPoint: *mut Point) -> i32;
+    }
+    unsafe {
+        let mut pt = Point { x: 0, y: 0 };
+        if GetCursorPos(&mut pt) != 0 {
+            Some((pt.x, pt.y))
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_global_cursor_pos() -> Option<(i32, i32)> {
+    None
+}
+
+fn is_cursor_near_pin_or_toolbar(
+    cx: i32,
+    cy: i32,
+    pin_win: &tauri::WebviewWindow,
+    toolbar_win: Option<&tauri::WebviewWindow>,
+) -> bool {
+    let pin_margin = 60;
+    let tb_margin = 24;
+    if let (Ok(pos), Ok(size)) = (pin_win.outer_position(), pin_win.outer_size())
+        && cx >= pos.x - pin_margin
+        && cx <= pos.x + size.width as i32 + pin_margin
+        && cy >= pos.y - pin_margin
+        && cy <= pos.y + size.height as i32 + pin_margin
+    {
+        return true;
+    }
+
+    if let Some(tb) = toolbar_win
+        && let (Ok(pos), Ok(size)) = (tb.outer_position(), tb.outer_size())
+        && cx >= pos.x - tb_margin
+        && cx <= pos.x + size.width as i32 + tb_margin
+        && cy >= pos.y - tb_margin
+        && cy <= pos.y + size.height as i32 + tb_margin
+    {
+        let _ = tb;
+        return true;
+    }
+
+    false
+}
+
+fn start_proximity_monitor(app: AppHandle) {
+    std::thread::spawn(move || {
+        let mut last_near_map: std::collections::HashMap<String, bool> = std::collections::HashMap::new();
+
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+
+            let windows = app.webview_windows();
+            let pin_entries: Vec<(String, tauri::WebviewWindow)> = windows
+                .iter()
+                .filter(|(l, _)| l.starts_with("pin-") && !l.starts_with("pin-toolbar-"))
+                .map(|(l, w)| (l.clone(), w.clone()))
+                .collect();
+
+            if pin_entries.is_empty() {
+                if !last_near_map.is_empty() {
+                    last_near_map.clear();
+                }
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                continue;
+            }
+
+            let Some((cx, cy)) = get_global_cursor_pos() else {
+                continue;
+            };
+
+            for (pin_label, pin_win) in pin_entries {
+                let pin_id = match pin_label.strip_prefix("pin-") {
+                    Some(id) => id,
+                    None => continue,
+                };
+                let tb_label = format!("pin-toolbar-{pin_id}");
+                let tb_win = app.get_webview_window(&tb_label);
+
+                let is_near = is_cursor_near_pin_or_toolbar(cx, cy, &pin_win, tb_win.as_ref());
+                let prev_near = last_near_map.get(pin_id).copied().unwrap_or(false);
+
+                if is_near != prev_near || !last_near_map.contains_key(pin_id) {
+                    last_near_map.insert(pin_id.to_string(), is_near);
+                    if let Some(ref tb) = tb_win
+                        && is_near
+                    {
+                        let _ = tb.set_ignore_cursor_events(false);
+                    }
+                    let _ = app.emit_to(&tb_label, "toolbar:proximity", is_near);
+                }
+            }
+
+            last_near_map.retain(|id, _| app.get_webview_window(&format!("pin-{id}")).is_some());
+        }
+    });
 }
 
 pub fn start_capture_flow(app: &AppHandle) -> Result<(), String> {
@@ -544,7 +669,12 @@ pub fn run() {
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--autostart"]),
+        ))
         .setup(|app| {
+            let is_autostart = std::env::args().any(|arg| arg == "--autostart");
             if let Some(main) = app.get_webview_window("main") {
                 let main_handle = main.clone();
                 main.on_window_event(move |event| {
@@ -553,6 +683,9 @@ pub fn run() {
                         let _ = main_handle.hide();
                     }
                 });
+                if is_autostart {
+                    let _ = main.hide();
+                }
             }
             let mut shortcut_warnings = Vec::new();
             let gc_app = app.handle().clone();
@@ -652,6 +785,7 @@ pub fn run() {
                 if event.state() == ShortcutState::Pressed { restore_interaction(app); }
             }) { eprintln!("No se pudo registrar Alt+Shift+G: {error}"); shortcut_warnings.push("restore".into()); }
             app.manage(ShortcutWarnings(shortcut_warnings));
+            start_proximity_monitor(app.handle().clone());
 
             Ok(())
         })
@@ -663,6 +797,7 @@ pub fn run() {
             cancel_capture,
             trigger_capture,
             toggle_ghost_mode,
+            set_toolbar_interactive,
             get_memory_pins,
             search_memory_pins,
             archive_pin_to_memory,
