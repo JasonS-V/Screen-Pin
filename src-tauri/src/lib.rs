@@ -266,6 +266,51 @@ async fn repin_from_memory(
 }
 
 #[tauri::command]
+fn get_pin_image_path(
+    db: State<'_, Arc<MemoryDatabase>>,
+    pin_id: String,
+) -> Result<String, String> {
+    let filename = format!("{}.png", pin_id);
+    let path = db.data_dir.join(&filename);
+    if path.exists() {
+        Ok(path.to_string_lossy().to_string())
+    } else {
+        Err(format!("No se encontró el archivo de imagen para {pin_id}"))
+    }
+}
+
+#[tauri::command]
+fn copy_pin_image(
+    state: State<'_, Arc<CaptureState>>,
+    db: State<'_, Arc<MemoryDatabase>>,
+    pin_id: String,
+) -> Result<(), String> {
+    let bytes = if let Some(b) = state.get_crop_bytes(&pin_id) {
+        b
+    } else {
+        let path = db.data_dir.join(format!("{}.png", pin_id));
+        std::fs::read(&path).map_err(|e| format!("No se pudo leer la imagen: {e}"))?
+    };
+
+    let img = image::load_from_memory(&bytes)
+        .map_err(|e| format!("Error procesando imagen: {e}"))?;
+    let rgba = img.to_rgba8();
+    let (width, height) = rgba.dimensions();
+
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Error abriendo portapapeles: {e}"))?;
+    clipboard
+        .set_image(arboard::ImageData {
+            width: width as usize,
+            height: height as usize,
+            bytes: std::borrow::Cow::Borrowed(rgba.as_raw()),
+        })
+        .map_err(|e| format!("Error guardando imagen en el portapapeles: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn open_memory_drawer(app: AppHandle) -> Result<(), String> {
     show_memory_drawer(&app)
 }
@@ -348,7 +393,7 @@ pub fn spawn_pin_window(
         .skip_taskbar(true)
         .transparent(true)
         .resizable(true)
-        .shadow(true)
+        .shadow(false)
         .build()
         .map_err(|e| format!("Fallo al instanciar ventana PinWindow: {e}"))?;
     win.set_position(tauri::PhysicalPosition::new(x as i32, y as i32))
@@ -404,7 +449,7 @@ fn show_pin_toolbar(
         let url = format!("/?view=pin-toolbar&pin_id={pin_id}");
         let win = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App(url.into()))
             .title("Acciones del recorte")
-            .inner_size(330.0, 52.0)
+            .inner_size(440.0, 68.0)
             .decorations(false)
             .always_on_top(true)
             .skip_taskbar(true)
@@ -668,6 +713,7 @@ pub fn run() {
                 .unwrap()
         })
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_drag::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -803,7 +849,9 @@ pub fn run() {
             archive_pin_to_memory,
             toggle_retention,
             repin_from_memory,
-            open_memory_drawer
+            open_memory_drawer,
+            copy_pin_image,
+            get_pin_image_path
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

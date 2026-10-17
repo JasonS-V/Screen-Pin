@@ -4,6 +4,8 @@
   import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { assetUrl, errorMessage, isTauri } from '$lib/desktop';
   import type { OcrLine, OcrPayload, PinRecord, SmartEntity } from '$lib/types';
+  import { playClickSound } from '$lib/sound';
+  import { startDrag } from '@crabnebula/tauri-plugin-drag';
 
   let { pinId, toolbar = false }: { pinId: string; toolbar?: boolean } = $props();
   let lines = $state<OcrLine[]>([]);
@@ -11,12 +13,20 @@
   let fullText = $state('');
   let ocrStatus = $state<'loading' | 'ready' | 'empty' | 'error'>('loading');
   let isGhostMode = $state(false);
+  let copyTextFeedback = $state(false);
+  let copyImageFeedback = $state(false);
   let copyFeedback = $state('');
   let error = $state('');
   let busy = $state(false);
   let viewHeight = $state(0);
   let feedbackTimer: ReturnType<typeof setTimeout>;
+  let imageFeedbackTimer: ReturnType<typeof setTimeout>;
   const bankEntity = $derived(entities.find(e => e.kind === 'BankDigits'));
+
+  // Ruta física del archivo para arrastre nativo hacia otras aplicaciones
+  let pinFilePath = $state('');
+  let pointerDownPos = $state<{ x: number; y: number } | null>(null);
+  let isDraggingStarted = $state(false);
 
   // Estados para visibilidad animada de la barra de opciones
   let isNear = $state(false);
@@ -91,6 +101,11 @@
 
           // Inicialmente la barra está oculta y no intercepta clics
           void invoke('set_toolbar_interactive', { pinId, interactive: false });
+        } else {
+          // Obtener ruta local en disco para arrastre nativo a otras apps
+          invoke<string>('get_pin_image_path', { pinId })
+            .then(p => { if (!disposed) pinFilePath = p; })
+            .catch(() => {});
         }
 
         const snapshot = await invoke<{ pin: PinRecord; entities: SmartEntity[] }>('get_pin', { pinId });
@@ -106,6 +121,7 @@
       disposed = true;
       listeners.forEach(fn => fn());
       clearTimeout(feedbackTimer);
+      clearTimeout(imageFeedbackTimer);
       clearTimeout(hideTimer);
       clearTimeout(interactiveTimer);
     };
@@ -115,6 +131,7 @@
     if (busy) return;
     busy = true;
     error = '';
+    playClickSound();
     try { await invoke('archive_pin_to_memory', { pinId }); }
     catch (cause) { error = errorMessage(cause); }
     finally { busy = false; }
@@ -125,23 +142,73 @@
     void archivePin();
   }
 
+  async function copyPinImageToClipboard() {
+    try {
+      playClickSound();
+      let success = false;
+      if (isTauri()) {
+        try {
+          await invoke('copy_pin_image', { pinId });
+          success = true;
+        } catch (cause) {
+          console.warn('Rust copy_pin_image fallo, probando navegador:', cause);
+        }
+      }
+      if (!success) {
+        const response = await fetch(assetUrl(pinId));
+        const blob = await response.blob();
+        await navigator.clipboard.write([
+          new ClipboardItem({ 'image/png': blob })
+        ]);
+      }
+      copyImageFeedback = true;
+      clearTimeout(imageFeedbackTimer);
+      imageFeedbackTimer = setTimeout(() => { copyImageFeedback = false; }, 1600);
+    } catch {
+      error = 'No se pudo copiar la imagen al portapapeles.';
+    }
+  }
+
+  async function copyAllText() {
+    if (!fullText.trim()) return;
+    try {
+      playClickSound();
+      await navigator.clipboard.writeText(fullText.trim());
+      copyTextFeedback = true;
+      copyFeedback = 'Texto copiado';
+      clearTimeout(feedbackTimer);
+      feedbackTimer = setTimeout(() => { copyTextFeedback = false; copyFeedback = ''; }, 1600);
+    } catch {
+      error = 'No se pudo copiar el texto al portapapeles.';
+    }
+  }
+
   function handleCopy(event: ClipboardEvent) {
     const text = window.getSelection()?.toString();
-    if (!text || !event.clipboardData) return;
-    event.clipboardData.setData('text/plain', text);
-    event.preventDefault();
+    if (text) {
+      if (event.clipboardData) {
+        event.clipboardData.setData('text/plain', text);
+        event.preventDefault();
+      }
+      return;
+    }
+    // Si no hay texto seleccionado, copiar la imagen al portapapeles con Ctrl+C
+    void copyPinImageToClipboard();
   }
 
   async function copyQuickValue(text: string, label: string) {
     try {
+      playClickSound();
       await navigator.clipboard.writeText(text);
       copyFeedback = `${label} copiado`;
+      copyTextFeedback = true;
       clearTimeout(feedbackTimer);
-      feedbackTimer = setTimeout(() => { copyFeedback = ''; }, 1600);
+      feedbackTimer = setTimeout(() => { copyTextFeedback = false; copyFeedback = ''; }, 1600);
     } catch { error = 'No se pudo copiar al portapapeles.'; }
   }
 
   async function toggleGhostMode() {
+    playClickSound();
     try {
       await invoke('toggle_ghost_mode', { pinId, enabled: !isGhostMode });
     } catch (cause) { error = errorMessage(cause); }
@@ -156,6 +223,54 @@
   function handlePinMouseLeave() {
     if (isTauri()) {
       void emitTo(`pin-toolbar-${pinId}`, 'toolbar:proximity', false);
+    }
+  }
+
+  function handleImagePointerDown(e: PointerEvent) {
+    if (e.button !== 0) return;
+    if ((e.target as HTMLElement).closest('.ocr-word, button') || window.getSelection()?.toString()) return;
+    pointerDownPos = { x: e.clientX, y: e.clientY };
+    isDraggingStarted = false;
+  }
+
+  async function handleImagePointerMove(e: PointerEvent) {
+    if (!pointerDownPos || isDraggingStarted) return;
+    const dx = e.clientX - pointerDownPos.x;
+    const dy = e.clientY - pointerDownPos.y;
+    if (Math.hypot(dx, dy) >= 6) {
+      isDraggingStarted = true;
+      pointerDownPos = null;
+      await initiateDrag();
+    }
+  }
+
+  function handleImagePointerUp() {
+    pointerDownPos = null;
+    isDraggingStarted = false;
+  }
+
+  async function initiateDrag() {
+    if (!isTauri()) return;
+    if (!pinFilePath) {
+      try {
+        pinFilePath = await invoke<string>('get_pin_image_path', { pinId });
+      } catch (err) {
+        console.warn('No se encontró archivo de imagen para arrastrar:', err);
+        return;
+      }
+    }
+    if (!pinFilePath) return;
+
+    try {
+      await startDrag({
+        item: [pinFilePath],
+        icon: pinFilePath,
+        mode: 'copy'
+      });
+    } catch (err) {
+      console.warn('Error al iniciar arrastre nativo de imagen:', err);
+    } finally {
+      isDraggingStarted = false;
     }
   }
 
@@ -187,11 +302,30 @@
   >
     <button
       class="toolbar-btn"
+      title="Copiar imagen al portapapeles para pegar en cualquier lugar (Ctrl+V)"
+      onclick={copyPinImageToClipboard}
+    >
+      {#if copyImageFeedback}
+        <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>Imagen copiada</span>
+      {:else}
+        <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span>Copiar imagen</span>
+      {/if}
+    </button>
+    <button
+      class="toolbar-btn"
       disabled={!fullText.trim()}
       title={ocrStatus === 'loading' ? 'Reconociendo texto…' : ocrStatus === 'error' ? 'Lectura no disponible' : ocrStatus === 'empty' ? 'No se detectó texto' : 'Copiar todo el texto'}
-      onclick={() => copyQuickValue(fullText, 'Texto')}
+      onclick={copyAllText}
     >
-      {copyFeedback ? 'Copiado ✓' : 'Copiar texto'}
+      {#if copyTextFeedback}
+        <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        <span>Texto copiado</span>
+      {:else}
+        <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>Copiar texto</span>
+      {/if}
     </button>
     <button
       class="toolbar-btn"
@@ -226,10 +360,25 @@
     class="calibration-corner"
     class:is-scanning={ocrStatus === 'loading'}
     data-tauri-drag-region
-    title="Arrastrar recorte"
+    title="Arrastrar para mover ventana"
   ></div>
 
-  <div class="image-stage" data-tauri-drag-region>
+  <div
+    class="window-drag-bar"
+    data-tauri-drag-region
+    title="Arrastrar para mover ventana"
+  ></div>
+
+  <div
+    class="image-stage"
+    role="region"
+    aria-label="Captura fijada en pantalla. Arrastra la imagen para pegarla en cualquier lugar."
+    title="Arrastrar imagen para pegar en otra aplicación / ventana"
+    onpointerdown={handleImagePointerDown}
+    onpointermove={handleImagePointerMove}
+    onpointerup={handleImagePointerUp}
+    onpointercancel={handleImagePointerUp}
+  >
     <img
       src={isTauri() ? assetUrl(pinId) : undefined}
       alt="Captura fijada en pantalla"
@@ -297,12 +446,22 @@
     position: absolute;
     top: 0;
     left: 0;
-    width: 10px;
-    height: 10px;
+    width: 12px;
+    height: 12px;
     border-top: 3px solid var(--accent-amber);
     border-left: 3px solid var(--accent-amber);
     z-index: 30;
-    cursor: grab;
+    cursor: move;
+  }
+
+  .window-drag-bar {
+    position: absolute;
+    top: 0;
+    left: 14px;
+    right: 0;
+    height: 8px;
+    z-index: 29;
+    cursor: move;
   }
 
   .calibration-corner.is-scanning {
@@ -370,9 +529,9 @@
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    padding: 2px 4px 10px 4px;
+    padding: 4px 14px 26px 14px;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow: visible;
     background: transparent;
   }
 
@@ -381,20 +540,23 @@
     align-items: center;
     gap: 4px;
     width: 100%;
-    max-width: 322px;
+    max-width: 412px;
     height: 38px;
     padding: 3px 4px;
     box-sizing: border-box;
-    overflow: hidden;
+    overflow: visible;
     color: var(--chassis-light);
-    background: var(--chassis-dark);
-    border: 1px solid var(--border-strong, #30302d);
+    background: #191918;
+    border: 1px solid #383835;
     border-radius: 6px;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
+    box-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.08),
+      0 6px 16px rgba(0, 0, 0, 0.12),
+      0 12px 24px rgba(0, 0, 0, 0.14);
 
     /* Oculto por defecto y desplazado hacia arriba */
     opacity: 0;
-    transform: translateY(-24px);
+    transform: translateY(-10px);
     pointer-events: none;
 
     /* Animación de retorno */
@@ -422,6 +584,7 @@
     flex: 1;
     min-width: 0;
     height: 30px;
+    padding: 0 6px;
     border: 0;
     border-radius: 3px;
     background: var(--surface-secondary, #262624);
@@ -431,6 +594,14 @@
     white-space: nowrap;
     cursor: pointer;
     transition: background 120ms ease;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .btn-icon {
+    flex-shrink: 0;
   }
 
   .toolbar-btn:hover:not(:disabled) {
