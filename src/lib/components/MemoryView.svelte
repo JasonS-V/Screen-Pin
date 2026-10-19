@@ -83,6 +83,8 @@
     }
   }
 
+  let lastDragTimestamp = 0;
+
   async function handlePreviewPointerDown(e: PointerEvent, pin: PinRecord) {
     if (e.button !== 0 || !desktop) return;
     const startX = e.clientX;
@@ -93,6 +95,7 @@
       if (dragStarted) return;
       if (Math.hypot(me.clientX - startX, me.clientY - startY) >= 6) {
         dragStarted = true;
+        lastDragTimestamp = Date.now();
         window.removeEventListener('pointermove', onMove);
         try {
           const path = await invoke<string>('get_pin_image_path', { pinId: pin.id });
@@ -195,7 +198,10 @@
           <li class="memory-card">
             <button
               class="preview"
-              onclick={() => action('repin_from_memory', pin.id)}
+              onclick={() => {
+                if (Date.now() - lastDragTimestamp < 400) return;
+                action('repin_from_memory', pin.id);
+              }}
               onpointerdown={(e) => handlePreviewPointerDown(e, pin)}
               disabled={!!busy}
               title={i18n.t.repinTitle}

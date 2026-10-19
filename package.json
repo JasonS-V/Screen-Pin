@@ -1,6 +1,6 @@
 {
   "name": "screen-pin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "El recorte que se queda flotando (con memoria)",
   "type": "module",
   "scripts": {

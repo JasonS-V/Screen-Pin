@@ -16,11 +16,13 @@
   let copyTextFeedback = $state(false);
   let copyImageFeedback = $state(false);
   let copyFeedback = $state('');
+  let copySuccessToast = $state('');
   let error = $state('');
   let busy = $state(false);
   let viewHeight = $state(0);
   let feedbackTimer: ReturnType<typeof setTimeout>;
   let imageFeedbackTimer: ReturnType<typeof setTimeout>;
+  let toastTimer: ReturnType<typeof setTimeout>;
   const bankEntity = $derived(entities.find(e => e.kind === 'BankDigits'));
 
   // Estados para visibilidad animada de la barra de opciones
@@ -112,6 +114,7 @@
       listeners.forEach(fn => fn());
       clearTimeout(feedbackTimer);
       clearTimeout(imageFeedbackTimer);
+      clearTimeout(toastTimer);
       clearTimeout(hideTimer);
       clearTimeout(interactiveTimer);
     };
@@ -152,8 +155,11 @@
         ]);
       }
       copyImageFeedback = true;
+      copySuccessToast = i18n.t.imageCopied;
       clearTimeout(imageFeedbackTimer);
+      clearTimeout(toastTimer);
       imageFeedbackTimer = setTimeout(() => { copyImageFeedback = false; }, 1600);
+      toastTimer = setTimeout(() => { copySuccessToast = ''; }, 1600);
     } catch {
       error = i18n.t.copyImageError;
     }
@@ -166,8 +172,11 @@
       await navigator.clipboard.writeText(fullText.trim());
       copyTextFeedback = true;
       copyFeedback = i18n.t.textCopied;
+      copySuccessToast = i18n.t.textCopied;
       clearTimeout(feedbackTimer);
+      clearTimeout(toastTimer);
       feedbackTimer = setTimeout(() => { copyTextFeedback = false; copyFeedback = ''; }, 1600);
+      toastTimer = setTimeout(() => { copySuccessToast = ''; }, 1600);
     } catch {
       error = i18n.t.copyTextError;
     }
@@ -191,9 +200,12 @@
       playClickSound();
       await navigator.clipboard.writeText(text);
       copyFeedback = `${label} ${i18n.current === 'es' ? 'copiado' : 'copied'}`;
+      copySuccessToast = copyFeedback;
       copyTextFeedback = true;
       clearTimeout(feedbackTimer);
+      clearTimeout(toastTimer);
       feedbackTimer = setTimeout(() => { copyTextFeedback = false; copyFeedback = ''; }, 1600);
+      toastTimer = setTimeout(() => { copySuccessToast = ''; }, 1600);
     } catch { error = i18n.t.clipboardError; }
   }
 
@@ -211,9 +223,7 @@
   }
 
   function handlePinMouseLeave() {
-    if (isTauri()) {
-      void emitTo(`pin-toolbar-${pinId}`, 'toolbar:proximity', false);
-    }
+    // Proximidad gestionada globalmente por monitor de Rust con márgenes de tolerancia
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -329,11 +339,12 @@
     />
 
     {#if ocrStatus === 'ready'}
-      <div class="ocr-layer" aria-label={i18n.t.extractedTextAria}>
+      <div class="ocr-layer" data-tauri-drag-region="false" aria-label={i18n.t.extractedTextAria}>
         {#each lines as line, lineIndex}
           {#each line.words as word, wordIndex}
             <span
               class="ocr-word"
+              data-tauri-drag-region="false"
               style:left="{word.bounds.x * 100}%"
               style:top="{word.bounds.y * 100}%"
               style:width="{word.bounds.width * 100}%"
@@ -348,6 +359,12 @@
     {/if}
   </div>
 
+  {#if copySuccessToast}
+    <div class="pin-toast" role="status">
+      <svg class="btn-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+      <span>{copySuccessToast}</span>
+    </div>
+  {/if}
   {#if error}<span class="pin-error" role="alert">{error}</span>{/if}
   {#if copyFeedback}<span class="sr-only" role="status">{copyFeedback}</span>{/if}
 </main>
@@ -465,6 +482,33 @@
   }
 
   .pin-error { position: absolute; bottom: 4px; left: 4px; right: 4px; z-index: 25; padding: 5px 7px; color: var(--accent-focus); background: var(--chassis-dark); font-size: 11px; overflow-wrap: anywhere; }
+
+  .pin-toast {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 8px;
+    background: rgba(20, 20, 19, 0.92);
+    border: 1px solid var(--accent-focus);
+    color: var(--chassis-light);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    z-index: 50;
+    pointer-events: none;
+    white-space: nowrap;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    animation: toast-pop 160ms ease-out;
+  }
+
+  @keyframes toast-pop {
+    from { opacity: 0; transform: translate(-50%, -4px); }
+    to { opacity: 1; transform: translate(-50%, 0); }
+  }
 
   .pin-toolbar-viewport {
     width: 100vw;

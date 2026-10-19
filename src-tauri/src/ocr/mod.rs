@@ -66,19 +66,42 @@ pub fn extract_smart_entities(full_text: &str) -> (Vec<SmartEntity>, bool) {
     let mut is_sensitive = false;
 
     for line in full_text.lines() {
-        let digits_only: String = line.chars().filter(|c| c.is_ascii_digit()).collect();
-        let allowed_formatting = line
+        let candidate_part = if let Some((_, value)) = line.split_once([':', '=']) {
+            value.trim()
+        } else {
+            line.trim()
+        };
+
+        let digits_only: String = candidate_part.chars().filter(|c| c.is_ascii_digit()).collect();
+        let allowed_formatting = candidate_part
             .chars()
             .filter(|c| c.is_ascii_digit() || *c == '-' || *c == ' ')
             .count();
 
-        // Evita falsos positivos en párrafos largos exigiendo que la línea sea mayormente numérica
-        if (10..=24).contains(&digits_only.len())
-            && allowed_formatting * 10 >= line.chars().count() * 7
-        {
+        let is_candidate_bank = (10..=24).contains(&digits_only.len())
+            && !candidate_part.is_empty()
+            && allowed_formatting * 10 >= candidate_part.chars().count() * 7;
+
+        let line_digits: String = line.chars().filter(|c| c.is_ascii_digit()).collect();
+        let line_allowed = line
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '-' || *c == ' ')
+            .count();
+        let is_line_bank = (10..=24).contains(&line_digits.len())
+            && !line.is_empty()
+            && line_allowed * 10 >= line.chars().count() * 7;
+
+        // Evita falsos positivos en párrafos largos exigiendo que la línea o su valor sea mayormente numérico
+        if is_candidate_bank {
             entities.push(SmartEntity::BankDigits {
                 raw: line.trim().to_string(),
                 clean_digits: digits_only,
+            });
+            is_sensitive = true;
+        } else if is_line_bank {
+            entities.push(SmartEntity::BankDigits {
+                raw: line.trim().to_string(),
+                clean_digits: line_digits,
             });
             is_sensitive = true;
         }
@@ -167,5 +190,20 @@ mod tests {
     fn recognizes_spanish_credentials_without_matching_unrelated_words() {
         assert!(extract_smart_entities("Contraseña: MiClave2026").1);
         assert!(!extract_smart_entities("Compass: norte").1);
+    }
+
+    #[test]
+    fn test_extract_bank_account_with_long_label() {
+        let sample = "Número de cuenta bancaria: 191-2849102-0-94";
+        let (entities, is_sensitive) = extract_smart_entities(sample);
+
+        assert!(is_sensitive);
+        assert_eq!(entities.len(), 1);
+        match &entities[0] {
+            SmartEntity::BankDigits { clean_digits, .. } => {
+                assert_eq!(clean_digits, "1912849102094");
+            }
+            _ => panic!("Entidad esperada: BankDigits"),
+        }
     }
 }

@@ -8,6 +8,9 @@ export const isMac =
    /Macintosh|Mac OS X/i.test(navigator.userAgent || ''));
 
 export function assetUrl(path: string): string {
+  if (!isTauri() || typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) {
+    return path;
+  }
   return convertFileSrc(path, 'pinasset');
 }
 

@@ -88,9 +88,14 @@
 
     const scaleX = imgW / rect.width;
     const scaleY = imgH / rect.height;
+    const rawSrcX = (clientX - rect.left) * scaleX - halfSample;
+    const rawSrcY = (clientY - rect.top) * scaleY - halfSample;
 
-    const srcX = (clientX - rect.left) * scaleX - halfSample;
-    const srcY = (clientY - rect.top) * scaleY - halfSample;
+    const maxSrcX = Math.max(0, imgW - sampleSize);
+    const maxSrcY = Math.max(0, imgH - sampleSize);
+
+    const srcX = Math.max(0, Math.min(rawSrcX, maxSrcX));
+    const srcY = Math.max(0, Math.min(rawSrcY, maxSrcY));
 
     ctx.imageSmoothingEnabled = false;
     ctx.clearRect(0, 0, loupeSize, loupeSize);
@@ -263,7 +268,11 @@
     onerror={() => { error = i18n.t.overlayBgLoadError; }}
     onload={() => {
       imgLoaded = true;
-      updateLoupe(window.innerWidth / 2, window.innerHeight / 2);
+      const centerX = Math.floor(window.innerWidth / 2);
+      const centerY = Math.floor(window.innerHeight / 2);
+      currentX = centerX;
+      currentY = centerY;
+      updateLoupe(centerX, centerY);
     }}
   />
 
@@ -284,7 +293,7 @@
       <div class="corner-mark bottom-left"></div>
       <div class="corner-mark bottom-right"></div>
 
-      <div class="dimension-badge" class:badge-inside={selY < 32}>
+      <div class="dimension-badge" class:badge-inside={selY < 32 || (typeof window !== 'undefined' && selY + selH > window.innerHeight - 34)}>
         <span class="dim-text">{physicalW} × {physicalH} px</span>
       </div>
     </div>
@@ -318,11 +327,11 @@
   {/if}
 
   <div class="shortcut-hints">
-    <span><strong>{i18n.current === 'es' ? 'Arrastrar' : 'Drag'}</strong>: {i18n.current === 'es' ? 'Delimitar área' : 'Select area'}</span>
-    <span><strong>{i18n.current === 'es' ? 'Esc / Clic Der.' : 'Esc / Right-Click'}</strong>: {i18n.t.cancel}</span>
-    <span><strong>{i18n.current === 'es' ? 'Flechas' : 'Arrows'}</strong>: {i18n.current === 'es' ? 'Ajuste fino' : 'Fine tune'}</span>
-    <span><strong>{i18n.current === 'es' ? 'Espacio' : 'Space'}</strong>: {i18n.current === 'es' ? 'Fijar ancla' : 'Lock anchor'}</span>
-    <span><strong>Enter</strong>: {i18n.current === 'es' ? 'Confirmar' : 'Confirm'}</span>
+    <span><strong>{i18n.t.hintDrag.split(': ')[0]}</strong>: {i18n.t.hintDrag.split(': ')[1]}</span>
+    <span><strong>{i18n.t.hintCancel.split(': ')[0]}</strong>: {i18n.t.hintCancel.split(': ')[1]}</span>
+    <span><strong>{i18n.t.hintArrows.split(': ')[0]}</strong>: {i18n.t.hintArrows.split(': ')[1]}</span>
+    <span><strong>{i18n.t.hintSpace.split(': ')[0]}</strong>: {i18n.t.hintSpace.split(': ')[1]}</span>
+    <span><strong>{i18n.t.hintEnter.split(': ')[0]}</strong>: {i18n.t.hintEnter.split(': ')[1]}</span>
   </div>
   {#if error}<div class="capture-error" role="alert">{error}<button onclick={cancel}>{i18n.t.cancel}</button></div>{/if}
   {#if isSaving}<div class="capture-saving" role="status">{i18n.t.savingCrop}</div>{/if}
