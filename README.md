@@ -80,3 +80,10 @@ Windows x64 builds include the Microsoft C++ DLLs needed by Tesseract. Keep them
 ## Visual assets
 
 [The source logo](static/favicon.svg) defines the favicon and Tauri icons; regenerate them with `pnpm tauri icon static/favicon.svg`. The interface uses the charcoal, paper, and orange palette in [DESIGN.md](DESIGN.md). The NSIS installer uses `src-tauri/nsis/sidebar.bmp`, `src-tauri/nsis/header.bmp`, and `src-tauri/icons/icon.ico`.
+
+## Feedback and support
+
+Have an idea to improve Screen-Pin, or encountered a bug?
+- 💡 [Submit a suggestion or feedback](https://github.com/JasonS-V/Screen-Pin/issues/new?template=feedback.yml)
+- 🐛 [Report a bug](https://github.com/JasonS-V/Screen-Pin/issues/new?template=bug_report.yml)
+- 💬 [Join GitHub Discussions](https://github.com/JasonS-V/Screen-Pin/discussions)

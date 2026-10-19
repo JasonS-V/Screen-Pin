@@ -5,6 +5,7 @@
   import { isTauri, isMac, errorMessage } from '$lib/desktop';
   import { isEnabled as isAutostartEnabled, enable as enableAutostart, disable as disableAutostart } from '@tauri-apps/plugin-autostart';
   import { isSoundEnabled, setSoundEnabled, playClickSound } from '$lib/sound';
+  import { openUrl } from '@tauri-apps/plugin-opener';
   import { i18n } from '$lib/i18n.svelte';
 
   const desktop = isTauri();
@@ -84,6 +85,23 @@
     try { await invoke(command); }
     catch (cause) { error = errorMessage(cause); }
     finally { busy = false; }
+  }
+
+  async function openFeedback() {
+    if (soundActive) {
+      playClickSound();
+    }
+    const url = 'https://github.com/JasonS-V/Screen-Pin/issues/new/choose';
+    try {
+      if (desktop) {
+        await openUrl(url);
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    } catch (cause) {
+      console.warn('Error abriendo enlace de feedback:', cause);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    }
   }
 </script>
 
@@ -228,6 +246,23 @@
               <span class="switch-thumb"></span>
             </button>
           </div>
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <strong>{i18n.t.feedbackLabel}</strong>
+            <span class="setting-desc">{i18n.t.feedbackDesc}</span>
+          </div>
+          <button
+            type="button"
+            class="feedback-btn"
+            onclick={openFeedback}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            {i18n.t.feedbackBtn}
+          </button>
         </div>
       </section>
     {/if}
@@ -426,6 +461,26 @@
   .test-sound-btn:hover {
     color: var(--chassis-light);
     border-color: var(--accent-focus);
+  }
+  .feedback-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #2a2a28;
+    color: var(--chassis-light);
+    border: 1px solid var(--border-strong);
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 120ms ease;
+  }
+  .feedback-btn:hover {
+    background: #333330;
+    border-color: var(--accent-focus);
+    color: #ffffff;
   }
   .switch-control {
     position: relative;

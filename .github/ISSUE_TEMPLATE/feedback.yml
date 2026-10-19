@@ -1,0 +1,45 @@
+name: 💡 Sugerencia o Idea (Feature Request / Feedback)
+description: Comparte una idea, mejora o comentario general sobre Screen Pin
+title: "[Feedback]: "
+labels: ["enhancement", "feedback"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ¡Gracias por ayudarnos a mejorar **Screen Pin**! Cuéntanos tu sugerencia o feedback.
+  - type: textarea
+    id: idea
+    attributes:
+      label: ¿Cuál es tu sugerencia o feedback?
+      description: Explica tu idea o la mejora que te gustaría ver en la aplicación.
+      placeholder: Me gustaría poder...
+    validations:
+      required: true
+  - type: textarea
+    id: motivation
+    attributes:
+      label: ¿Qué problema o caso de uso resuelve?
+      description: Describe cómo te ayudaría o en qué situación te resultó necesario.
+      placeholder: En mi flujo de trabajo suelo necesitar...
+    validations:
+      required: false
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema operativo
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon - M1/M2/M3/M4)
+        - macOS (Intel)
+        - Linux
+        - Otro
+    validations:
+      required: true
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Contexto adicional o capturas
+      description: Adjunta capturas de pantalla, bocetos o cualquier otro detalle relevante.
+    validations:
+      required: false

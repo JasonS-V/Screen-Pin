@@ -1,0 +1,56 @@
+name: 🐛 Reporte de Error (Bug Report)
+description: Reporta un error o comportamiento inesperado en Screen Pin
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Gracias por reportar este problema. Completa los siguientes campos para ayudarnos a reproducirlo y resolverlo rápidamente.
+  - type: textarea
+    id: description
+    attributes:
+      label: Descripción del problema
+      description: Una explicación concisa y clara de lo que sucedió versus lo que esperabas.
+      placeholder: Al recortar una sección de la pantalla...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducirlo
+      description: Pasos ordenados para reproducir el fallo.
+      value: |
+        1. Iniciar Screen Pin
+        2. Presionar el atajo...
+        3. Realizar la acción...
+        4. Ver el error...
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Sistema operativo
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon - M1/M2/M3/M4)
+        - macOS (Intel)
+        - Linux
+        - Otro
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: Versión de Screen Pin
+      placeholder: ej. v0.1.0 (o instalador / versión portable)
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Mensaje de error o notas adicionales
+      description: Pega aquí cualquier mensaje de error visible, advertencia o captura.
+    validations:
+      required: false

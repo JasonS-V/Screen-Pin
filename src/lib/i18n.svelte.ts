@@ -46,6 +46,9 @@ export const translations = {
     soundTestBtn: 'Test',
     soundTestTitle: 'Test tile sound',
     soundAria: 'Tactile sound effects',
+    feedbackLabel: 'Feedback & Suggestions',
+    feedbackDesc: 'Share ideas, suggest features, or report issues on GitHub.',
+    feedbackBtn: 'Send feedback',
 
     // Pin View & Toolbar
     pinTitle: 'Pin · Screen-Pin',
@@ -170,6 +173,9 @@ export const translations = {
     soundTestBtn: 'Probar',
     soundTestTitle: 'Probar sonido de ficha',
     soundAria: 'Efectos de sonido táctiles',
+    feedbackLabel: 'Feedback y Sugerencias',
+    feedbackDesc: 'Comparte ideas, sugiere mejoras o reporta problemas en GitHub.',
+    feedbackBtn: 'Enviar feedback',
 
     // Pin View & Toolbar
     pinTitle: 'Recorte · Screen-Pin',

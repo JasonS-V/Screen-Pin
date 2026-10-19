@@ -8,6 +8,7 @@
     "core:window:allow-start-dragging",
     "core:window:allow-set-position",
     "autostart:default",
-    "drag:default"
+    "drag:default",
+    "opener:default"
   ]
 }
