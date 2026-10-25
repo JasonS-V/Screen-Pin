@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">Screen-Pin</h1>
 <p align="center">A screen crop that stays on top, with local memory.</p>
-<p align="center"><a href="https://github.com/JasonS-V/Screen-Pin/releases/tag/v0.1.1"><strong>Download v0.1.1</strong></a></p>
+<p align="center"><a href="https://github.com/JasonS-V/Screen-Pin/releases/tag/v0.1.2"><strong>Download v0.1.2</strong></a></p>
 
 Screen-Pin is a desktop app for Windows and macOS. Capture a region, keep it floating above other windows, then find its image or recognized text in your local library. OCR and storage stay on your computer.
 
@@ -11,14 +11,14 @@ Screen-Pin is a desktop app for Windows and macOS. Capture a region, keep it flo
 
 | Platform | Package |
 | --- | --- |
-| Windows x64 | [NSIS installer](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.1/Screen-Pin_0.1.1_x64-setup.exe) |
-| Windows x64 | [Portable ZIP](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.1/Screen-Pin_0.1.1_x64_portable.zip) |
-| macOS Apple Silicon | [App ZIP](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.1/Screen-Pin_0.1.1_macos_arm64.zip) |
-| macOS Intel | [App ZIP](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.1/Screen-Pin_0.1.1_macos_x64.zip) |
+| Windows x64 | [NSIS installer](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.2/Screen-Pin_0.1.2_x64-setup.exe) |
+| Windows x64 | [Portable ZIP](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.2/Screen-Pin_0.1.2_x64_portable.zip) |
+| macOS Apple Silicon | [App ZIP](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.2/Screen-Pin_0.1.2_macos_arm64.zip) |
+| macOS Intel | [App ZIP](https://github.com/JasonS-V/Screen-Pin/releases/download/v0.1.2/Screen-Pin_0.1.2_macos_x64.zip) |
 
 The Windows portable package needs a writable folder and Microsoft Edge WebView2 Runtime. Keep the executable, DLLs, `resources`, and `portable.flag` together. Captures and the database are stored in a `data` folder beside the executable, so move the entire folder to keep them.
 
-On macOS 11 or later, grant **Screen Recording** permission in **System Settings > Privacy & Security** when prompted. You may need to restart Screen-Pin after granting it. The v0.1.1 apps are signed ad hoc but are not notarized, so macOS may also require you to allow the app manually in Privacy & Security.
+On macOS 11 or later, grant **Screen Recording** permission in **System Settings > Privacy & Security** when prompted. You may need to restart Screen-Pin after granting it. The v0.1.2 apps are signed ad hoc but are not notarized, so macOS may also require you to allow the app manually in Privacy & Security.
 
 ## Use Screen-Pin
 

@@ -36,16 +36,42 @@ pub(super) fn is_technical(line: &OcrLine) -> bool {
         .map(|word| word.text.as_str())
         .collect::<Vec<_>>()
         .join(" ");
+
+    // Las URLs no deben sobreescribirse con Tesseract, ya que Windows OCR maneja mucho
+    // mejor la segmentación y caracteres de enlaces web sin sesgos erróneos de vocabulario.
+    if is_url_like(&text) {
+        return false;
+    }
+
     text.contains('\\')
         || text
             .chars()
-            .filter(|c| "{}[]<>|=&_!$#`/^*".contains(*c))
+            .filter(|c| "{}[]<>|=&_!$#`^*".contains(*c))
             .count()
             >= 2
         || text.matches('%').count() >= 2
         || text.contains("--")
         || matches!(text.trim(), "{" | "}" | "[" | "]" | "|" | ">" | "$")
         || text.trim_start().starts_with('#')
+}
+
+fn is_url_like(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.contains("http://")
+        || lower.contains("https://")
+        || lower.contains("www.")
+        || lower.contains(".com/")
+        || lower.contains(".org/")
+        || lower.contains(".net/")
+        || lower.contains(".edu/")
+        || lower.contains(".gov/")
+        || lower.contains(".io/")
+        || lower.contains(".app/")
+        || lower.contains(".dev/")
+        || lower.contains("docs.google.")
+        || lower.contains("drive.google.")
+        || lower.contains("/spreadsheets/")
+        || lower.contains("/document/")
 }
 
 fn parse_tsv(tsv: &str, width: u32, height: u32) -> Result<Vec<OcrLine>, String> {

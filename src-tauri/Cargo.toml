@@ -1,6 +1,6 @@
 [package]
 name = "screen-pin"
-version = "0.1.1"
+version = "0.1.2"
 description = "Screen-Pin: El recorte que se queda flotando (con memoria)"
 authors = ["you"]
 edition = "2024"

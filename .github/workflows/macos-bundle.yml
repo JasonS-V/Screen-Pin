@@ -37,9 +37,9 @@ jobs:
           app="src-tauri/target/release/bundle/macos/Screen-Pin.app"
           test -x "$app/Contents/MacOS/screen-pin"
           codesign --verify --deep --strict "$app"
-          ditto -c -k --sequesterRsrc --keepParent "$app" "Screen-Pin_0.1.1_macos_${{ matrix.arch }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "Screen-Pin_0.1.2_macos_${{ matrix.arch }}.zip"
       - uses: actions/upload-artifact@v4
         with:
-          name: Screen-Pin_0.1.1_macos_${{ matrix.arch }}
-          path: Screen-Pin_0.1.1_macos_${{ matrix.arch }}.zip
+          name: Screen-Pin_0.1.2_macos_${{ matrix.arch }}
+          path: Screen-Pin_0.1.2_macos_${{ matrix.arch }}.zip
           if-no-files-found: error

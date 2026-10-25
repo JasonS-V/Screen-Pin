@@ -34,15 +34,15 @@ pub fn run_windows_ocr(pin_id: &str, img: &RgbaImage) -> Result<OcrPayload, Stri
             let mut tile_lines = Vec::new();
             // Windows conserva los idiomas instalados; Tesseract recupera signos de código.
             for (source, scale, technical_pass) in [
-                (&enhanced, 3, false),
                 (&tile, 3, false),
+                (&enhanced, 3, false),
                 (&enhanced, 2, true),
             ] {
                 let scaled = image::imageops::resize(
                     source,
                     width * scale,
                     height * scale,
-                    image::imageops::FilterType::CatmullRom,
+                    image::imageops::FilterType::Lanczos3,
                 );
                 let border = scale * padding;
                 let mut prepared = RgbaImage::from_pixel(
@@ -147,6 +147,9 @@ pub fn run_windows_ocr(pin_id: &str, img: &RgbaImage) -> Result<OcrPayload, Stri
             .total_cmp(&b.bounds.y)
             .then(a.bounds.x.total_cmp(&b.bounds.x))
     });
+    for line in &mut lines {
+        repair_line_urls(line);
+    }
     let full_text = lines
         .iter()
         .map(|line| {
@@ -166,6 +169,128 @@ pub fn run_windows_ocr(pin_id: &str, img: &RgbaImage) -> Result<OcrPayload, Stri
         entities,
         is_sensitive,
     })
+}
+
+fn repair_line_urls(line: &mut OcrLine) {
+    if line.words.is_empty() {
+        return;
+    }
+    if line.words.len() == 1 {
+        if let Some(word) = line.words.first_mut() {
+            fix_google_doc_url(&mut word.text);
+        }
+        return;
+    }
+
+    let mut merged_words: Vec<OcrWord> = Vec::new();
+    let mut i = 0;
+    while i < line.words.len() {
+        let current = &line.words[i];
+        if is_url_start(&current.text) {
+            let mut combined_text = current.text.clone();
+            let mut combined_bounds = current.bounds.clone();
+            let mut j = i + 1;
+            while j < line.words.len() {
+                let candidate = &line.words[j];
+                if is_url_continuation(&combined_text, &candidate.text) {
+                    combined_text.push_str(&candidate.text);
+                    let right = (combined_bounds.x + combined_bounds.width)
+                        .max(candidate.bounds.x + candidate.bounds.width);
+                    let bottom = (combined_bounds.y + combined_bounds.height)
+                        .max(candidate.bounds.y + candidate.bounds.height);
+                    combined_bounds.x = combined_bounds.x.min(candidate.bounds.x);
+                    combined_bounds.y = combined_bounds.y.min(candidate.bounds.y);
+                    combined_bounds.width = right - combined_bounds.x;
+                    combined_bounds.height = bottom - combined_bounds.y;
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+            fix_google_doc_url(&mut combined_text);
+            merged_words.push(OcrWord {
+                text: combined_text,
+                bounds: combined_bounds,
+            });
+            i = j;
+        } else {
+            merged_words.push(current.clone());
+            i += 1;
+        }
+    }
+    line.words = merged_words;
+}
+
+fn is_url_start(text: &str) -> bool {
+    let lower = text.to_lowercase();
+    lower.starts_with("http://")
+        || lower.starts_with("https://")
+        || lower.starts_with("www.")
+        || lower.starts_with("docs.google.")
+        || lower.starts_with("drive.google.")
+        || lower.contains(".com/")
+        || lower.contains(".org/")
+        || lower.contains(".net/")
+        || lower.contains(".edu/")
+        || lower.contains(".gov/")
+        || lower.contains(".io/")
+        || lower.contains(".app/")
+        || lower.contains(".dev/")
+        || lower.contains(".me/")
+}
+
+fn is_url_continuation(current_url: &str, candidate: &str) -> bool {
+    if candidate.is_empty() {
+        return false;
+    }
+    if current_url.ends_with(['/', '=', '?', '&', '-']) {
+        return true;
+    }
+    if candidate.starts_with(['/', '?', '&', '=', '#']) {
+        return true;
+    }
+    if (current_url.contains("/d/")
+        || current_url.contains("/file/")
+        || current_url.contains("/document/")
+        || current_url.contains("/spreadsheets/"))
+        && candidate
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '/')
+    {
+        return true;
+    }
+    if candidate.contains('/')
+        && candidate
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/-_.~?&=%#".contains(c))
+    {
+        return true;
+    }
+    false
+}
+
+fn fix_google_doc_url(url: &mut String) {
+    if let Some(pos) = url.find("/d/l") {
+        let after = pos + 4;
+        if after < url.len()
+            && url[after..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric())
+        {
+            url.replace_range(pos..pos + 4, "/d/1");
+        }
+    } else if let Some(pos) = url.find("/d/I") {
+        let after = pos + 4;
+        if after < url.len()
+            && url[after..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphanumeric())
+        {
+            url.replace_range(pos..pos + 4, "/d/1");
+        }
+    }
 }
 
 fn enhance_contrast(img: &RgbaImage) -> RgbaImage {
@@ -557,6 +682,29 @@ mod tests {
                 payload.full_text
             );
         }
+    }
+
+    #[test]
+    fn reads_sheet_url() {
+        let img = image::load_from_memory(include_bytes!("fixtures/sheet-url.png"))
+            .unwrap()
+            .to_rgba8();
+        let payload = run_windows_ocr("sheet-url", &img).unwrap();
+        assert!(
+            payload.full_text.starts_with("docs.google.com/spreadsheets/d/1DRt5V6mPsxzMfzQsxW_Jf4"),
+            "URL prefix should match accurately: {}",
+            payload.full_text
+        );
+        assert!(
+            payload.full_text.ends_with("/edit"),
+            "URL should end with /edit: {}",
+            payload.full_text
+        );
+        assert!(
+            !payload.full_text.contains(' '),
+            "URL should not contain spaces: {}",
+            payload.full_text
+        );
     }
 
     #[test]
